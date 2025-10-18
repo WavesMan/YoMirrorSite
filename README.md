@@ -95,6 +95,7 @@ cache:
     mode: "lru"                   # 或 "lfu"
     hot_data_refresh_sec: 30      # 热点数据刷新间隔
     hot_data_threshold: 10        # 热点数据访问阈值
+```
 
 ---
 
@@ -104,7 +105,7 @@ cache:
 
 1. 克隆项目到本地：
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/WavesMan/YoOSF-API.git
    cd yoosf-api
    ```
 
@@ -162,62 +163,8 @@ cache:
 
 ## RESTful API 接口
 
-### 1. 健康检查
+查阅 [API 文档](docs/api.md)
 
-**接口**: `/health`  
-**请求方式**: GET
-
-**响应**:
-```
-json
-{
-  "status": "ok"
-}
-```
----
-
-### 2. 获取文件列表
-
-**接口**: `/api/files`  
-**请求方式**: GET  
-**查询参数**:
-- **prefix** (可选): 文件路径前缀过滤
-
-**示例**:
-```bash
-curl "http://localhost:8080/api/files"
-curl "http://localhost:8080/api/files?prefix=dist/"
-```
----
-
-### 3. 获取文件下载 URL
-
-**接口**: `/api/files/url/{文件路径}`  
-**请求方式**: GET  
-**路径参数**:
-- 文件路径: S3 对象的完整路径
-
-**查询参数**:
-- **expires** (可选): URL 超时时间（单位：秒）
-
-**示例**:
-```bash
-curl "http://localhost:8080/api/files/url/dist/index.html?expires=1800"
-```
----
-
-### 4. 搜索文件
-
-**接口**: `/api/search/files`  
-**请求方式**: GET  
-**查询参数**:
-- **keyword** (必需): 搜索关键词
-- **limit** (可选): 限制返回的搜索结果数量，默认 50
-
-**示例**:
-```bash
-curl "http://localhost:8080/api/search/files?keyword=paper"
-```
 ---
 
 ## 配置说明
@@ -311,8 +258,9 @@ yoosf-api
 ## 开发与贡献
 
 1. Fork 项目到自己的仓库。
-2. 创建新分支并实现功能或修复 bugs。
-3. 提交 PR 并描述变更内容。
+2. 阅读开发者文档 [DeveloperRedme](docs/DeveloperRedme.md)
+3. 创建新分支并实现功能或修复 bugs。
+4. 提交 PR 并描述变更内容。
 
 ---
 
