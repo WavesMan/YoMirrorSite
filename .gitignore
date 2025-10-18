@@ -1,0 +1,34 @@
+# Ignore configuration files
+/configs/config.yaml
+/versions.json
+
+# Ignore build output
+bin/*
+build/*
+dist/*
+
+# Ignore scripts directory
+scripts/*
+
+# Ignore node modules
+node_modules/*
+
+
+# Ignore test area
+test-area/*
+
+# Ignore logs
+logs/*
+*.log
+
+# ignore IDE specific files
+.vscode/
+.idea/
+
+
+data/
+version/
+
+# 但排除 web/dist 目录及其内容
+!web/src/data
+

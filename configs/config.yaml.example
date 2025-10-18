@@ -1,0 +1,43 @@
+# 服务配置
+server:
+  port: 8080
+  goroutine_pool_size: 100
+  parallel_download_threads: 5
+
+# Redis配置
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+# 缓存配置
+cache:
+  filesListRefreshIntervalSec: 300
+  # 本地热点缓存配置
+  local_cache:
+    enabled: true                    # 是否启用本地缓存
+    size: 1000                       # 本地缓存容量（条目数）
+    mode: "lru"                      # 缓存模式：lru（最近最少使用）或 lfu（最不经常使用）
+    hot_data_refresh_sec: 30         # 热点数据刷新间隔（秒）
+    hot_data_threshold: 10           # 热点数据访问阈值
+
+# S3对象存储配置
+s3:
+  access_key: "your-access-key"
+  secret_key: "your-secret-key"
+  endpoint: "https://s3.example.com"
+  bucket_name: "your-bucket-name"
+  listen_dir: "public/"
+  cors:
+    allowed_origins:
+      - "https://example.com"
+      - "https://www.example.com"
+    allowed_methods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+    allowed_headers:
+      - "Authorization"
+      - "Content-Type"
+    max_age_seconds: 3600
