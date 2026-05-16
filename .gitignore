@@ -1,34 +1,40 @@
-# Ignore configuration files
+# 配置文件（含密钥，不入库）
 /configs/config.yaml
 /versions.json
 
-# Ignore build output
-bin/*
-build/*
-dist/*
+# 编译产物
+bin/
+build/
+dist/
+*.exe
+yo-mirror.exe
 
-# Ignore scripts directory
-scripts/*
+# 前端构建产物
+web/dist/
 
-# Ignore node modules
-node_modules/*
+# 前端依赖
+node_modules/
 
-
-# Ignore test area
-test-area/*
-
-# Ignore logs
-logs/*
-*.log
-
-# ignore IDE specific files
+# IDE
 .vscode/
 .idea/
 
+# 日志
+logs/
+*.log
 
+# AI 会话临时文件
+chat_export_*.md
+session_*.json
+.deepseek/
+
+# 测试区
+test-area/
+scripts/
+
+# 数据目录
 data/
 version/
 
-# 但排除 web/dist 目录及其内容
-!web/src/data
-
+# Windows 系统缓存残留
+%SystemDrive%/

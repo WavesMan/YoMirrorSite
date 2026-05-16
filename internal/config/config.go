@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
@@ -13,6 +14,7 @@ type Config struct {
 	S3     S3Config     `yaml:"s3"`
 	Redis  RedisConfig  `yaml:"redis"`
 	Cache  CacheConfig  `yaml:"cache"`
+	Mirror MirrorConfig `yaml:"mirror"` // 软件镜像站配置（YoMirrorSite 新增）
 }
 
 // ServerConfig 服务配置
@@ -83,6 +85,10 @@ func (c *S3Config) AWSConfig() aws.Config {
 	}
 }
 
+// ============================================================
+// 配置验证
+// ============================================================
+
 // Validate 验证配置是否有效
 func (c *Config) Validate() error {
 	// 验证S3配置
@@ -100,4 +106,88 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// ============================================================
+// 镜像站配置（YoMirrorSite 新增）
+// ============================================================
+
+// MirrorConfig 软件镜像站配置
+// 定义需要镜像的软件列表和同步参数
+type MirrorConfig struct {
+	SoftwareList []SoftwareConfig `yaml:"software_list"` // 需镜像的软件列表
+	Sync         SyncConfig       `yaml:"sync"`          // 同步参数
+}
+
+// SoftwareConfig 单个软件的镜像配置
+// 每一条配置对应一个 GitHub 仓库的镜像策略
+type SoftwareConfig struct {
+	ID             string        `yaml:"id"`              // 软件唯一标识，如 "vscode"
+	Name           string        `yaml:"name"`            // 显示名称，如 "Visual Studio Code"
+	GitHubRepo     string        `yaml:"github_repo"`     // GitHub 仓库 "owner/repo"
+	Category       string        `yaml:"category"`        // 分类标签
+	Tags           []string      `yaml:"tags"`            // 标签列表
+	FilterAssets   []AssetFilter `yaml:"filter_assets"`   // 资产过滤规则（只同步匹配的文件）
+	SyncPrerelease bool          `yaml:"sync_prerelease"` // 是否同步预发布版本
+	IconPattern    string        `yaml:"icon_pattern"`    // 图标文件在仓库中的路径模式（可选）
+}
+
+// AssetFilter 资产过滤规则
+// 用于从 GitHub Release 的众多资产中筛选出需要镜像的文件
+type AssetFilter struct {
+	Platform string `yaml:"platform"` // 目标平台标识："windows-x64" / "linux-arm64" / "macos-universal"
+	Pattern  string `yaml:"pattern"`  // 文件名匹配模式（支持 * 通配符），如 "VSCode-win32-x64-*.zip"
+}
+
+// SyncConfig 同步调度配置
+type SyncConfig struct {
+	IntervalMinutes int    `yaml:"interval_minutes"` // 同步间隔（分钟），默认 30
+	GitHubToken     string `yaml:"github_token"`     // GitHub Personal Access Token（可选，提升速率限制）
+	MaxConcurrent   int    `yaml:"max_concurrent"`   // 最大并发同步数，默认 3
+	RetryAttempts   int    `yaml:"retry_attempts"`   // 单次同步失败重试次数，默认 3
+}
+
+// ============================================================
+// 配置默认值填充
+// ============================================================
+
+// ApplyDefaults 为镜像站配置填充默认值
+func (c *MirrorConfig) ApplyDefaults() {
+	if c.Sync.IntervalMinutes <= 0 {
+		c.Sync.IntervalMinutes = 30
+	}
+	if c.Sync.MaxConcurrent <= 0 {
+		c.Sync.MaxConcurrent = 3
+	}
+	if c.Sync.RetryAttempts <= 0 {
+		c.Sync.RetryAttempts = 3
+	}
+	// 为每个软件配置过滤规则提供默认值
+	for i := range c.SoftwareList {
+		sw := &c.SoftwareList[i]
+		if sw.Category == "" {
+			sw.Category = "uncategorized"
+		}
+	}
+}
+
+// GetAssetFilter 根据平台标识获取资产过滤模式
+// 如果没有配置该平台的过滤规则，返回空字符串
+func (sw *SoftwareConfig) GetAssetFilter(platform string) string {
+	for _, f := range sw.FilterAssets {
+		if f.Platform == platform {
+			return f.Pattern
+		}
+	}
+	return ""
+}
+
+// MatchAssetName 检查资产文件名是否匹配任一过滤规则
+func (sw *SoftwareConfig) MatchAssetName(name string) bool {
+	for _, f := range sw.FilterAssets {
+		if strings.Contains(name, strings.Trim(f.Pattern, "*")) {
+			return true
+		}
+	}
+	return len(sw.FilterAssets) == 0 // 如果没有配置过滤规则，则全部通过
 }
