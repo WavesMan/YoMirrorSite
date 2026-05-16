@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"yomirrorsite/internal/model"
 	"yomirrorsite/internal/config"
 	"yomirrorsite/internal/core/github"
@@ -29,7 +31,6 @@ import (
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/util"
 
-	"go.uber.org/zap"
 )
 
 // ============================================================
@@ -68,7 +69,6 @@ type GitHubSyncer struct {
 	s3Client    *s3.Client            // S3 对象存储客户端
 	config      *config.MirrorConfig  // 镜像站配置
 	pgClient    *postgres.Client      // PG 持久化层（可选，nil 时跳过）
-	logger      *zap.Logger           // 结构化日志
 
 	// 同步状态（内存中维护，外部通过 SyncStatus API 查询）
 	mu          sync.RWMutex
@@ -102,7 +102,6 @@ func NewGitHubSyncer(ghClient *github.Client, s3Client *s3.Client, cfg *config.M
 		s3Client: s3Client,
 		config:   cfg,
 		pgClient: pgClient,
-		logger:   util.GetLogger(),
 	}
 }
 
@@ -125,7 +124,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		return nil, fmt.Errorf("获取同步锁失败: %w", err)
 	}
 	if !locked {
-		s.logger.Info("同步已被其他实例执行中，跳过",
+		util.Info("同步已被其他实例执行中，跳过",
 			zap.String("software", swCfg.ID))
 		return result, nil
 	}
@@ -137,7 +136,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 	// 2. 获取已同步的最新 tag
 	lastSyncedTag, err := s.getLastSyncedTag(ctx, swCfg.ID)
 	if err != nil {
-		s.logger.Warn("获取已同步标记失败，将全量同步",
+		util.Warn("获取已同步标记失败，将全量同步",
 			zap.String("software", swCfg.ID), zap.Error(err))
 	}
 
@@ -152,7 +151,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		return nil, fmt.Errorf("获取 Releases 失败: %w", err)
 	}
 
-	s.logger.Info("获取到 Releases",
+	util.Info("获取到 Releases",
 		zap.String("software", swCfg.ID),
 		zap.Int("total", len(releases)),
 		zap.String("last_synced_tag", lastSyncedTag))
@@ -172,7 +171,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 
 		// 跳过预发布版本（如果配置不要求同步）
 		if release.Prerelease && !swCfg.SyncPrerelease {
-			s.logger.Debug("跳过预发布版本",
+			util.Debug("跳过预发布版本",
 				zap.String("software", swCfg.ID),
 				zap.String("tag", release.TagName))
 			continue
@@ -204,7 +203,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 	// 5. 更新已同步标记
 	if newestTag > lastSyncedTag || (lastSyncedTag == "" && newestTag != "") {
 		if err := s.setLastSyncedTag(ctx, swCfg.ID, newestTag); err != nil {
-			s.logger.Error("更新已同步标记失败",
+			util.Error("更新已同步标记失败",
 				zap.String("software", swCfg.ID), zap.Error(err))
 			result.Errors = append(result.Errors, "更新同步标记失败: "+err.Error())
 		}
@@ -234,7 +233,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		Duration:    result.Duration.Round(time.Second).String(),
 	}
 
-	s.logger.Info("软件同步完成",
+	util.Info("软件同步完成",
 		zap.String("software", swCfg.ID),
 		zap.Int("new_versions", result.NewVersions),
 		zap.Int("new_assets", result.NewAssets),
@@ -266,12 +265,12 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 		// 检查是否已存在于 S3
 		exists, err := s.s3Client.ObjectExists(ctx, s3Key)
 		if err != nil {
-			s.logger.Warn("检查文件存在性失败",
+			util.Warn("检查文件存在性失败",
 				zap.String("key", s3Key), zap.Error(err))
 		}
 		if exists {
 			result.Skipped++
-			s.logger.Debug("文件已存在，跳过",
+			util.Debug("文件已存在，跳过",
 				zap.String("key", s3Key))
 			continue
 		}
@@ -282,7 +281,7 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 		if err != nil {
 			result.Failed = append(result.Failed, asset.Name)
 			cancel()
-			s.logger.Error("下载资产失败",
+			util.Error("下载资产失败",
 				zap.String("asset", asset.Name),
 				zap.Error(err))
 			continue
@@ -301,7 +300,7 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 
 		if err != nil {
 			result.Failed = append(result.Failed, asset.Name)
-			s.logger.Error("上传资产到 S3 失败",
+			util.Error("上传资产到 S3 失败",
 				zap.String("asset", asset.Name),
 				zap.String("key", s3Key),
 				zap.Error(err))
@@ -325,7 +324,7 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 			}})
 		}
 
-		s.logger.Info("资产同步成功",
+		util.Info("资产同步成功",
 			zap.String("software", swCfg.ID),
 			zap.String("version", release.TagName),
 			zap.String("asset", asset.Name),
@@ -365,7 +364,7 @@ func (s *GitHubSyncer) saveVersionMeta(ctx context.Context, softwareID string, r
 	}
 
 	if err := util.SetJSON(ctx, key, detail, 24*time.Hour); err != nil {
-		s.logger.Warn("保存版本元数据失败",
+		util.Warn("保存版本元数据失败",
 			zap.String("key", key), zap.Error(err))
 	}
 }
@@ -459,7 +458,7 @@ func (s *GitHubSyncer) writeToPG(ctx context.Context, swCfg config.SoftwareConfi
 	// 创建同步日志
 	logID, err := s.pgClient.CreateSyncLog(ctx, swCfg.ID)
 	if err != nil {
-		s.logger.Warn("创建同步日志失败", zap.String("software", swCfg.ID), zap.Error(err))
+		util.Warn("创建同步日志失败", zap.String("software", swCfg.ID), zap.Error(err))
 	}
 
 	// 更新软件基本信息
@@ -473,7 +472,7 @@ func (s *GitHubSyncer) writeToPG(ctx context.Context, swCfg config.SoftwareConfi
 			TotalSize:  0, // TODO: 从 PG 聚合计算
 		}
 		if err := s.pgClient.UpsertSoftware(ctx, sw); err != nil {
-			s.logger.Warn("PG 更新软件信息失败", zap.String("software", swCfg.ID), zap.Error(err))
+			util.Warn("PG 更新软件信息失败", zap.String("software", swCfg.ID), zap.Error(err))
 		}
 		// 保存标签
 		if len(swCfg.Tags) > 0 {

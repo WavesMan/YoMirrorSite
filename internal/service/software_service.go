@@ -86,7 +86,8 @@ func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword st
 		if err == nil {
 			items := make([]model.Software, len(list))
 			for i := range list { items[i] = list[i].ToAPI() }
-			return &model.SoftwareListPage{Items: items, Page: page, PageSize: pageSize, TotalCount: int(total)}, nil
+			util.Debug("软件列表查询成功", util.Module("service"), zap.Int("count", len(items)), zap.Int64("total", total), util.Action("list"))
+		return &model.SoftwareListPage{Items: items, Page: page, PageSize: pageSize, TotalCount: int(total)}, nil
 		}
 		util.Warn("PG 查询软件列表失败，降级到 Redis/S3", zap.Error(err))
 	}
@@ -152,6 +153,7 @@ func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*
 				cacheKey := softwareDetailKeyPrefix + softwareID
 				_ = util.SetJSON(context.Background(), cacheKey, detail, softwareDetailCacheTTL)
 			}()
+			util.Debug("PG 查询软件详情成功", util.Module("service"), util.Software(softwareID), util.Action("detail"))
 			return &detail, nil
 		}
 		if err != nil {
@@ -167,8 +169,9 @@ func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*
 		util.Warn("从 Redis 读取软件详情失败", zap.String("id", softwareID), zap.Error(err))
 	}
 	if found {
-		return &detail, nil
-	}
+			util.Debug("Redis 缓存命中", util.Module("service"), util.Software(softwareID), util.Action("cache"))
+			return &detail, nil
+		}
 
 	// 2. 从 S3 加载
 	detail, err = s.loadSoftwareFromS3(ctx, softwareID)

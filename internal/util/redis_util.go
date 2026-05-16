@@ -1,6 +1,7 @@
 package util
 
 import (
+	"crypto/tls"
 	"context"
 	"encoding/json"
 	"strconv"
@@ -16,9 +17,13 @@ var RedisClient *redis.Client
 // InitRedisClient 初始化 Redis 客户端
 func InitRedisClient(addr, password string, db int) {
 	RedisClient = redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+		Addr:         addr,
+		Password:     password,
+		DB:           db,
+		TLSConfig:    &tls.Config{InsecureSkipVerify: true},
+		DialTimeout:  10 * time.Second,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	})
 
 	// 测试连接

@@ -34,6 +34,7 @@ func NewSyncHandler(scheduler *syncer.Scheduler) *SyncHandler {
 // GET /api/sync/status
 // 返回当前同步进度、最近同步结果等
 func (h *SyncHandler) GetStatus(c *fiber.Ctx) error {
+	util.Debug("同步状态请求", util.Module("handler"))
 	status := h.scheduler.GetStatus()
 	return c.Status(fiber.StatusOK).JSON(model.APIResponse{
 		Success: true,
@@ -45,6 +46,7 @@ func (h *SyncHandler) GetStatus(c *fiber.Ctx) error {
 // POST /api/sync/trigger
 // Body: {"software_id": "vscode"}  空则同步全部
 func (h *SyncHandler) TriggerSync(c *fiber.Ctx) error {
+	util.Info("手动同步触发", util.Module("handler"))
 	// 解析请求体
 	var req struct {
 		SoftwareID string `json:"software_id"`

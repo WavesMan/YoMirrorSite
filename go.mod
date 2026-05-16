@@ -14,6 +14,7 @@ require (
 	github.com/panjf2000/ants/v2 v2.10.0
 	github.com/spf13/viper v1.19.0
 	go.uber.org/zap v1.27.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12
 )

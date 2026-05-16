@@ -25,6 +25,7 @@ func NewFileHandler(fileService *service.FileService) *FileHandler {
 
 // GetFileList 获取文件列表
 func (h *FileHandler) GetFileList(c *fiber.Ctx) error {
+	util.Debug("文件列表请求", util.Module("handler"))
 	// 获取查询参数
 	prefix := c.Query("prefix")
 
@@ -50,6 +51,7 @@ func (h *FileHandler) GetFileList(c *fiber.Ctx) error {
 
 // GetDownloadURL 获取下载URL
 func (h *FileHandler) GetDownloadURL(c *fiber.Ctx) error {
+	util.Debug("下载URL请求", util.Module("handler"))
 	// 获取路径参数（使用通配符参数，可能包含前导斜杠）
 	key := c.Params("*")
 	// 移除前导斜杠（如果存在）

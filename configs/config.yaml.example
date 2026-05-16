@@ -75,3 +75,15 @@ postgres:
   dbname: "yomirror"
   sslmode: "disable"
   max_conns: 10
+# ============================================================
+# 日志配置
+# ============================================================
+log:
+  level: "debug"                # debug / info / warn / error
+  file:
+    enabled: true               # 启用文件存储
+    path: "logs/app.log"
+    max_size_mb: 100            # 单文件上限
+    max_backups: 10             # 保留归档数
+    max_age_days: 30            # 最大保留天数
+    compress: true              # gzip 归档

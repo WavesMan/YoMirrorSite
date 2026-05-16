@@ -25,6 +25,7 @@ func NewSearchHandler(searchService *service.SearchService) *SearchHandler {
 
 // SearchFiles 搜索文件
 func (h *SearchHandler) SearchFiles(c *fiber.Ctx) error {
+	util.Debug("搜索请求", util.Module("handler"))
 	// 获取查询参数
 	keyword := c.Query("keyword")
 	limitStr := c.Query("limit")
