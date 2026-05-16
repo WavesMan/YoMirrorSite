@@ -1,3 +1,18 @@
+<!--
+  @fileoverview 搜索结果页：根据查询参数展示匹配软件
+
+  数据流：
+    route.query.q → store.loadSoftwareList({ keyword }) → API
+    无 props（页面组件通过路由和 store 获取数据）
+
+  依赖：
+    - @/stores/mirror (Pinia store)
+    - @/api (fetch 函数)
+    - @/types (接口定义)
+    - 子组件：SoftwareCard
+
+  路由：/search — search
+-->
 <script setup lang="ts">
 // 搜索结果页
 import { useMirrorStore } from '@/stores/mirror'
@@ -21,21 +36,18 @@ watch(() => route.query.q, search)
 
 <template>
   <div class="page-container">
-    <h1 class="text-2xl font-bold mb-6">
+    <h1 class="text-2xl font-display font-bold mb-6">
       搜索: "{{ route.query.q }}"
     </h1>
 
-    <div v-if="store.loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <n-skeleton v-for="i in 6" :key="i" height="120" />
+    <div v-if="store.loading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div v-for="i in 3" :key="i" class="animate-pulse bg-zinc-100 rounded-2rem h-48" />
     </div>
-    <div v-else-if="store.softwareList.length === 0" class="text-center py-12">
-      <n-empty description="未找到匹配的软件">
-        <template #extra>
-          <n-button @click="$router.push('/software')">浏览全部软件</n-button>
-        </template>
-      </n-empty>
+    <div v-else-if="store.softwareList.length === 0" class="text-center py-16">
+      <p class="text-zinc-400 mb-4">未找到匹配 "{{ route.query.q }}" 的软件</p>
+      <n-button @click="$router.push('/software')" class="!rounded-xl">浏览全部软件</n-button>
     </div>
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <SoftwareCard
         v-for="sw in store.softwareList"
         :key="sw.id"
