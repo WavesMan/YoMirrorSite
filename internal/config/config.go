@@ -10,11 +10,12 @@ import (
 
 // Config 应用程序配置
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	S3     S3Config     `yaml:"s3"`
-	Redis  RedisConfig  `yaml:"redis"`
-	Cache  CacheConfig  `yaml:"cache"`
-	Mirror MirrorConfig `yaml:"mirror"` // 软件镜像站配置（YoMirrorSite 新增）
+	Server   ServerConfig   `yaml:"server"`
+	S3       S3Config       `yaml:"s3"`
+	Redis    RedisConfig    `yaml:"redis"`
+	Cache    CacheConfig    `yaml:"cache"`
+	Mirror   MirrorConfig   `yaml:"mirror"`   // 软件镜像站配置
+	Postgres PostgresConfig `yaml:"postgres"` // PG 持久化配置（可选，不配则降级）
 }
 
 // ServerConfig 服务配置
@@ -180,6 +181,56 @@ func (sw *SoftwareConfig) GetAssetFilter(platform string) string {
 		}
 	}
 	return ""
+}
+
+// ============================================================
+// PostgreSQL 配置（YoMirrorSite 新增）
+// ============================================================
+
+// PostgresConfig PostgreSQL 连接配置
+// Host 为空时，系统降级到纯 S3 + Redis 模式
+type PostgresConfig struct {
+	Host     string `yaml:"host"`      // 数据库地址
+	Port     int    `yaml:"port"`      // 端口，默认 5432
+	User     string `yaml:"user"`      // 用户名
+	Password string `yaml:"password"`  // 密码
+	DBName   string `yaml:"dbname"`    // 数据库名
+	SSLMode  string `yaml:"sslmode"`   // sslmode，默认 disable
+	MaxConns int    `yaml:"max_conns"` // 最大连接数，默认 10
+}
+
+// IsEnabled PG 是否已配置（Host 非空即为启用）
+func (c *PostgresConfig) IsEnabled() bool {
+	return c.Host != ""
+}
+
+// DSN 生成 database/sql 连接字符串
+func (c *PostgresConfig) DSN() string {
+	port := c.Port
+	if port == 0 {
+		port = 5432
+	}
+	sslmode := c.SSLMode
+	if sslmode == "" {
+		sslmode = "disable"
+	}
+	return fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		c.Host, port, c.User, c.Password, c.DBName, sslmode,
+	)
+}
+
+// ApplyDefaults 填充默认值
+func (c *PostgresConfig) ApplyDefaults() {
+	if c.Port == 0 {
+		c.Port = 5432
+	}
+	if c.SSLMode == "" {
+		c.SSLMode = "disable"
+	}
+	if c.MaxConns == 0 {
+		c.MaxConns = 10
+	}
 }
 
 // MatchAssetName 检查资产文件名是否匹配任一过滤规则

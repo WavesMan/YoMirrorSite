@@ -27,6 +27,7 @@ logs/
 chat_export_*.md
 session_*.json
 .deepseek/
+AGENTS.md
 
 # 测试区
 test-area/

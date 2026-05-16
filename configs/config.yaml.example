@@ -41,3 +41,37 @@ s3:
       - "Authorization"
       - "Content-Type"
     max_age_seconds: 3600
+
+# ============================================================
+# 软件镜像站配置
+# ============================================================
+mirror:
+  software_list:
+    - id: "vscode"
+      name: "Visual Studio Code"
+      github_repo: "microsoft/vscode"
+      category: "editor"
+      tags: ["开发工具", "编辑器", "微软"]
+      filter_assets:
+        - platform: "windows-x64"
+          pattern: "VSCode-win32-x64-*.zip"
+        - platform: "linux-x64"
+          pattern: "code-stable-x64-*.tar.gz"
+      sync_prerelease: false
+  sync:
+    interval_minutes: 30
+    github_token: "${GITHUB_TOKEN}"
+    max_concurrent: 3
+    retry_attempts: 3
+
+# ============================================================
+# PostgreSQL 持久化配置（可选，不配则降级到纯 S3+Redis）
+# ============================================================
+postgres:
+  host: "localhost"
+  port: 5432
+  user: "yomirror"
+  password: "${PG_PASSWORD}"
+  dbname: "yomirror"
+  sslmode: "disable"
+  max_conns: 10

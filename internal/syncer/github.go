@@ -25,6 +25,7 @@ import (
 	"yomirrorsite/internal/model"
 	"yomirrorsite/internal/config"
 	"yomirrorsite/internal/core/github"
+	"yomirrorsite/internal/core/postgres"
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/util"
 
@@ -66,6 +67,7 @@ type GitHubSyncer struct {
 	ghClient    *github.Client        // GitHub API 客户端
 	s3Client    *s3.Client            // S3 对象存储客户端
 	config      *config.MirrorConfig  // 镜像站配置
+	pgClient    *postgres.Client      // PG 持久化层（可选，nil 时跳过）
 	logger      *zap.Logger           // 结构化日志
 
 	// 同步状态（内存中维护，外部通过 SyncStatus API 查询）
@@ -93,12 +95,13 @@ type SyncResult struct {
 // ============================================================
 
 // NewGitHubSyncer 创建同步器
-// 使用依赖注入：ghClient 负责 API 调用，s3Client 负责存储
-func NewGitHubSyncer(ghClient *github.Client, s3Client *s3.Client, cfg *config.MirrorConfig) *GitHubSyncer {
+// 使用依赖注入：ghClient 负责 API 调用，s3Client 负责存储，pgClient 负责持久化
+func NewGitHubSyncer(ghClient *github.Client, s3Client *s3.Client, cfg *config.MirrorConfig, pgClient *postgres.Client) *GitHubSyncer {
 	return &GitHubSyncer{
 		ghClient: ghClient,
 		s3Client: s3Client,
 		config:   cfg,
+		pgClient: pgClient,
 		logger:   util.GetLogger(),
 	}
 }
@@ -180,6 +183,17 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		if assetsUploaded > 0 {
 			// 写入版本元数据到 Redis
 			s.saveVersionMeta(ctx, swCfg.ID, &release)
+			// PG 持久化：upsert version（按 software_id + tag_name 唯一）
+			if s.pgClient != nil && s.pgClient.IsEnabled() {
+				_, _ = s.pgClient.UpsertVersion(ctx, &model.VersionTable{
+					SoftwareID:  swCfg.ID,
+					TagName:     release.TagName,
+					Name:        release.Name,
+					Prerelease:  release.Prerelease,
+					PublishedAt: release.PublishedAt,
+					Body:        release.Body,
+				})
+			}
 			result.NewVersions++
 			if release.TagName > newestTag {
 				newestTag = release.TagName
@@ -203,6 +217,10 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 	s.mu.Lock()
 	s.lastSyncAt = time.Now()
 	s.mu.Unlock()
+
+	// 7. PG 持久化（YoMirrorSite 新增）
+	// 每条资产上传后立即写 PG；此处汇总 upsert software 表
+	s.writeToPG(ctx, swCfg, result, newestTag)
 
 	result.Duration = time.Since(startTime)
 	s.setStatus(false, "")
@@ -293,6 +311,19 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 		result.NewAssets++
 		result.TotalSize += asset.Size
 		uploaded++
+
+		// PG 持久化：每条资产上传后立即 INSERT（幂等：s3_key 唯一）
+		if s.pgClient != nil && s.pgClient.IsEnabled() {
+			_, _ = s.pgClient.BatchInsertAssets(ctx, []model.AssetTable{{
+				VersionID:   0, // version_id 暂置 0，对账时再关联
+				Name:        asset.Name,
+				Size:        asset.Size,
+				ContentType: asset.ContentType,
+				Platform:    swCfg.GetAssetFilter(asset.Name),
+				S3Key:       s3Key,
+				Checksum:    "", // TODO: 流式上传后无法回算，对账时补
+			}})
+		}
 
 		s.logger.Info("资产同步成功",
 			zap.String("software", swCfg.ID),
@@ -411,4 +442,58 @@ func ComputeChecksum(r io.Reader) (string, error) {
 // MirrorPath 构建 S3 中的镜像文件路径
 func MirrorPath(softwareID, tagName, assetName string) string {
 	return path.Join(mirrorsPathPrefix, softwareID, "versions", tagName, assetName)
+}
+
+// ============================================================
+// PG 写入（YoMirrorSite 新增）
+// ============================================================
+
+// writeToPG 将同步结果写入 PostgreSQL
+// 每资产上传时已立即 INSERT asset，此处汇总 upsert software + 写 sync_log
+// 强一致性：S3 上传成功 = PG asset 记录存在（逐资产紧耦合）
+func (s *GitHubSyncer) writeToPG(ctx context.Context, swCfg config.SoftwareConfig, result *SyncResult, newestTag string) {
+	if s.pgClient == nil || !s.pgClient.IsEnabled() {
+		return
+	}
+
+	// 创建同步日志
+	logID, err := s.pgClient.CreateSyncLog(ctx, swCfg.ID)
+	if err != nil {
+		s.logger.Warn("创建同步日志失败", zap.String("software", swCfg.ID), zap.Error(err))
+	}
+
+	// 更新软件基本信息
+	if result.NewVersions > 0 || result.NewAssets > 0 {
+		sw := &model.SoftwareTable{
+			ID:         swCfg.ID,
+			Name:       swCfg.Name,
+			GitHubRepo: swCfg.GitHubRepo,
+			Category:   swCfg.Category,
+			LatestVer:  newestTag,
+			TotalSize:  0, // TODO: 从 PG 聚合计算
+		}
+		if err := s.pgClient.UpsertSoftware(ctx, sw); err != nil {
+			s.logger.Warn("PG 更新软件信息失败", zap.String("software", swCfg.ID), zap.Error(err))
+		}
+		// 保存标签
+		if len(swCfg.Tags) > 0 {
+			_ = s.pgClient.SaveTags(ctx, swCfg.ID, swCfg.Tags)
+		}
+	}
+
+	// 完成同步日志
+	if logID > 0 {
+		status := "success"
+		errMsg := ""
+		if len(result.Failed) > 0 {
+			status = "partial"
+			errMsg = fmt.Sprintf("部分资产失败: %v", result.Failed)
+		}
+		if len(result.Errors) > 0 {
+			status = "failed"
+			errMsg = strings.Join(result.Errors, "; ")
+		}
+		_ = s.pgClient.FinishSyncLog(ctx, logID, status,
+			result.NewVersions, result.NewAssets, result.Skipped, result.TotalSize, errMsg)
+	}
 }

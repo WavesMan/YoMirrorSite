@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"yomirrorsite/internal/model"
+	"yomirrorsite/internal/core/postgres"
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/util"
 
@@ -49,15 +50,18 @@ const (
 type SoftwareService struct {
 	s3Client     *s3.Client          // S3 对象存储客户端
 	cacheManager *util.CacheManager  // 本地 LRU/LFU 缓存管理器
+	pgClient     *postgres.Client    // PG 持久化层（可选，nil 时降级）
 }
 
 // NewSoftwareService 创建软件服务
 // s3Client：S3 客户端（复用已有实例）
 // cacheManager：本地缓存管理器（可选，nil 时跳过低延迟缓存层）
-func NewSoftwareService(s3Client *s3.Client, cacheManager *util.CacheManager) *SoftwareService {
+// pgClient：PG 持久化客户端（可选，nil 时降级到纯 S3+Redis）
+func NewSoftwareService(s3Client *s3.Client, cacheManager *util.CacheManager, pgClient *postgres.Client) *SoftwareService {
 	return &SoftwareService{
 		s3Client:     s3Client,
 		cacheManager: cacheManager,
+		pgClient:     pgClient,
 	}
 }
 
@@ -66,7 +70,8 @@ func NewSoftwareService(s3Client *s3.Client, cacheManager *util.CacheManager) *S
 // ============================================================
 
 // ListSoftware 获取软件列表（支持分类筛选和关键词搜索）
-// 缓存策略：本地 LRU → Redis → S3 源站
+// 查询链路：PG（SQL 分页）→ Redis → S3 源站
+// PG 启用时直接 SQL 分页+排序，O(log n)；否则全量加载后内存筛选
 func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword string, page, pageSize int) (*model.SoftwareListPage, error) {
 	if page <= 0 {
 		page = 1
@@ -75,19 +80,28 @@ func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword st
 		pageSize = defaultPageSize
 	}
 
-	// 1. 尝试从 Redis 获取软件列表
+	// 1. PG 优先：直接 SQL 分页 + 排序
+	if s.pgClient != nil && s.pgClient.IsEnabled() {
+		list, total, err := s.pgClient.ListSoftware(ctx, page, pageSize, category, keyword, "stars")
+		if err == nil {
+			items := make([]model.Software, len(list))
+			for i := range list { items[i] = list[i].ToAPI() }
+			return &model.SoftwareListPage{Items: items, Page: page, PageSize: pageSize, TotalCount: int(total)}, nil
+		}
+		util.Warn("PG 查询软件列表失败，降级到 Redis/S3", zap.Error(err))
+	}
+
+	// 2. 降级：Redis → S3 全量加载 + 内存筛选
 	var allSoftware []model.Software
 	found, err := util.GetJSON(ctx, softwareListKey, &allSoftware)
 	if err != nil {
 		util.Warn("从 Redis 读取软件列表失败，降级到 S3", zap.Error(err))
 	}
 	if !found {
-		// 2. 从 S3 加载并写回缓存
 		allSoftware, err = s.loadSoftwareListFromS3(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("加载软件列表失败: %w", err)
 		}
-		// 异步写回 Redis（避免阻塞请求）
 		go func() {
 			_ = util.SetJSON(context.Background(), softwareListKey, allSoftware, softwareListCacheTTL)
 		}()
@@ -127,7 +141,25 @@ func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword st
 // GetSoftware 获取软件详情（含版本列表）
 // 缓存策略：Redis → S3
 func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*model.SoftwareDetail, error) {
-	// 1. 查 Redis 缓存
+	// 1. PG 优先：SQL 联合查询 software + tags + versions
+	if s.pgClient != nil && s.pgClient.IsEnabled() {
+		sw, found, err := s.pgClient.GetSoftware(ctx, softwareID)
+		if err == nil && found {
+			tags, _ := s.pgClient.GetTags(ctx, softwareID)
+			versions, _ := s.pgClient.ListVersionsBySoftware(ctx, softwareID, 0)
+			detail := s.assembleDetail(sw, tags, versions)
+			go func() {
+				cacheKey := softwareDetailKeyPrefix + softwareID
+				_ = util.SetJSON(context.Background(), cacheKey, detail, softwareDetailCacheTTL)
+			}()
+			return &detail, nil
+		}
+		if err != nil {
+			util.Warn("PG 查询软件详情失败，降级到 Redis/S3", zap.String("id", softwareID), zap.Error(err))
+		}
+	}
+
+	// 2. 降级：查 Redis 缓存
 	cacheKey := softwareDetailKeyPrefix + softwareID
 	var detail model.SoftwareDetail
 	found, err := util.GetJSON(ctx, cacheKey, &detail)
@@ -388,3 +420,28 @@ func filterSoftware(list []model.Software, category, keyword string) []model.Sof
 
 // lastSyncedCreated 占位变量，表明时间来自 Redis
 var lastSyncedCreated string
+
+// ============================================================
+// PG 组装（YoMirrorSite 新增）
+// ============================================================
+
+// assembleDetail 从 PG 的 software + tags + versions 组装 SoftwareDetail
+func (s *SoftwareService) assembleDetail(sw *model.SoftwareTable, tags []string, versions []model.VersionTable) model.SoftwareDetail {
+	vbriefs := make([]model.VersionBrief, 0, len(versions))
+	for _, v := range versions {
+		vbriefs = append(vbriefs, model.VersionBrief{
+			TagName:     v.TagName,
+			Name:        v.Name,
+			Prerelease:  v.Prerelease,
+			PublishedAt: v.PublishedAt.Format("2006-01-02"),
+		})
+	}
+	return model.SoftwareDetail{
+		Software:      sw.ToAPI(),
+		Tags:          tags,
+		Versions:      vbriefs,
+		TotalVersions: len(vbriefs),
+		TotalSize:     sw.TotalSize,
+		ReadmeMD:      sw.ReadmeMD,
+	}
+}

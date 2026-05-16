@@ -39,6 +39,7 @@ type Software struct {
 // 在 Software 基础上追加版本列表和统计信息
 type SoftwareDetail struct {
 	Software                         // 嵌入软件基本字段
+	Tags          []string       `json:"tags"`            // 标签列表（从 PG software_tag 表读取）
 	Versions      []VersionBrief `json:"versions"`       // 版本概要列表（不含资产详情）
 	TotalVersions int            `json:"total_versions"` // 已镜像的版本总数
 	TotalSize     int64          `json:"total_size"`     // 所有文件总大小（字节）

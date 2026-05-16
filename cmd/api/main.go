@@ -12,6 +12,7 @@ import (
 	"yomirrorsite/api/router"
 	"yomirrorsite/internal/config"
 	"yomirrorsite/internal/core/github"
+	"yomirrorsite/internal/core/postgres"
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/service"
 	"yomirrorsite/internal/syncer"
@@ -113,12 +114,21 @@ func main() {
 	// YoMirrorSite 新增模块初始化
 	// ============================================================
 
+	// 初始化 PostgreSQL 持久化层（可选，不配则降级到纯 S3+Redis）
+	pgClient, err := postgres.NewClient(ctx, &cfg.Postgres)
+	if err != nil {
+		util.Warn("PostgreSQL 连接失败，降级到纯 S3+Redis 模式", zap.Error(err))
+		pgClient = nil
+	}
+	if pgClient != nil {
+		defer pgClient.Close()
+	}
+
 	// 初始化 GitHub API 客户端
-	// 复用 util/proxy.go 的 HTTP 客户端配置
 	ghClient := github.NewClient(nil, cfg.Mirror.Sync.GitHubToken)
 
-	// 初始化 GitHub Release 同步器
-	ghSyncer := syncer.NewGitHubSyncer(ghClient, s3Client, &cfg.Mirror)
+	// 初始化 GitHub Release 同步器（注入 pgClient）
+	ghSyncer := syncer.NewGitHubSyncer(ghClient, s3Client, &cfg.Mirror, pgClient)
 
 	// 初始化同步调度器
 	scheduler := syncer.NewScheduler(ghSyncer, &cfg.Mirror)
@@ -127,8 +137,8 @@ func main() {
 	scheduler.Start(ctx)
 	defer scheduler.Stop()
 
-	// 初始化软件业务服务
-	softwareService := service.NewSoftwareService(s3Client, cacheManager)
+	// 初始化软件业务服务（注入 pgClient）
+	softwareService := service.NewSoftwareService(s3Client, cacheManager, pgClient)
 
 	// 初始化软件处理器
 	softwareHandler := handler.NewSoftwareHandler(softwareService)
