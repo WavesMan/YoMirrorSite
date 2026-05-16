@@ -227,4 +227,4 @@ sudo systemctl start yomirrorsite
 
 ## 许可证
 
-MIT
+[ GPL-v2.0 License ](LICENSE)
