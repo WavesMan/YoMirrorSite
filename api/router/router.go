@@ -4,8 +4,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"s3-file-service/api/handler"
-	"s3-file-service/internal/core/s3"
+	"yomirrorsite/api/handler"
+	"yomirrorsite/internal/core/s3"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -15,7 +15,7 @@ import (
 func SetupRouter(fileHandler *handler.FileHandler, searchHandler *handler.SearchHandler, corsValidator *s3.CORSValidator) *fiber.App {
 	// 创建Fiber应用
 	app := fiber.New(fiber.Config{
-		AppName: "S3 File Service",
+		AppName: "YoMirrorSite",
 	})
 
 	// 注册CORS中间件
@@ -59,7 +59,7 @@ func SetupRouter(fileHandler *handler.FileHandler, searchHandler *handler.Search
 		}
 	}
 
-	// 健康检查
+	// 健康检查（基础版，具体依赖检查在 main.go 中覆盖）
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status": "ok",
@@ -84,4 +84,27 @@ func SetupRouter(fileHandler *handler.FileHandler, searchHandler *handler.Search
 	})
 
 	return app
+}
+
+// ============================================================
+// 镜像站路由注册（YoMirrorSite 新增）
+// ============================================================
+
+// RegisterMirrorRoutes 在已有 Fiber app 上注册镜像站路由
+// 与 SetupRouter 分离，降低耦合
+func RegisterMirrorRoutes(app *fiber.App, softwareHandler *handler.SoftwareHandler, syncHandler *handler.SyncHandler) {
+	api := app.Group("/api/mirror")
+	{
+		api.Get("/software", softwareHandler.ListSoftware)                     // 软件列表
+		api.Get("/software/:id", softwareHandler.GetSoftware)                  // 软件详情
+		api.Get("/software/:id/versions/:tag", softwareHandler.GetVersion)      // 版本详情
+		api.Get("/software/:id/download/:tag/:asset", softwareHandler.GetDownloadURL) // 下载
+		api.Get("/stats", softwareHandler.GetStats)                            // 镜像站统计
+	}
+
+	sync := app.Group("/api/sync")
+	{
+		sync.Get("/status", syncHandler.GetStatus)    // 同步状态
+		sync.Post("/trigger", syncHandler.TriggerSync) // 手动触发同步
+	}
 }

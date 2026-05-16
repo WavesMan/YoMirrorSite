@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	"s3-file-service/internal/service"
+	"yomirrorsite/internal/service"
 )
 
 // APIResponse API响应

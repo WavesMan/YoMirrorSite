@@ -12,8 +12,8 @@ import (
 	"github.com/aws/smithy-go"
 	"go.uber.org/zap"
 
-	"s3-file-service/internal/config"
-	"s3-file-service/internal/util"
+	"yomirrorsite/internal/config"
+	"yomirrorsite/internal/util"
 )
 
 // Client S3客户端

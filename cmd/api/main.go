@@ -8,13 +8,16 @@ import (
 	"syscall"
 	"time"
 
-	"s3-file-service/api/handler"
-	"s3-file-service/api/router"
-	"s3-file-service/internal/config"
-	"s3-file-service/internal/core/s3"
-	"s3-file-service/internal/service"
-	"s3-file-service/internal/util"
+	"yomirrorsite/api/handler"
+	"yomirrorsite/api/router"
+	"yomirrorsite/internal/config"
+	"yomirrorsite/internal/core/github"
+	"yomirrorsite/internal/core/s3"
+	"yomirrorsite/internal/service"
+	"yomirrorsite/internal/syncer"
+	"yomirrorsite/internal/util"
 
+	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 )
 
@@ -31,6 +34,9 @@ func main() {
 	if err != nil {
 		util.Fatal("Failed to load config", zap.Error(err))
 	}
+
+	// 填充镜像站配置默认值
+	cfg.Mirror.ApplyDefaults()
 
 	// 验证配置
 	if err := cfg.Validate(); err != nil {
@@ -54,6 +60,8 @@ func main() {
 	// 初始化Redis客户端
 	util.InitRedisClient(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
 	defer util.CloseRedisClient()
+
+	ctx := context.Background()
 
 	// 初始化本地缓存管理器
 	var cacheManager *util.CacheManager
@@ -84,7 +92,7 @@ func main() {
 	if cfg.Cache.FilesListRefreshIntervalSec > 0 {
 		refreshInterval := time.Duration(cfg.Cache.FilesListRefreshIntervalSec) * time.Second
 		prefixes := []string{""} // 根目录和常用目录
-		fileService.StartCacheRefresher(context.Background(), prefixes, refreshInterval)
+		fileService.StartCacheRefresher(ctx, prefixes, refreshInterval)
 	}
 
 	// 启动热点数据动态加载任务
@@ -101,8 +109,63 @@ func main() {
 	// 初始化搜索处理器
 	searchHandler := handler.NewSearchHandler(searchService)
 
+	// ============================================================
+	// YoMirrorSite 新增模块初始化
+	// ============================================================
+
+	// 初始化 GitHub API 客户端
+	// 复用 util/proxy.go 的 HTTP 客户端配置
+	ghClient := github.NewClient(nil, cfg.Mirror.Sync.GitHubToken)
+
+	// 初始化 GitHub Release 同步器
+	ghSyncer := syncer.NewGitHubSyncer(ghClient, s3Client, &cfg.Mirror)
+
+	// 初始化同步调度器
+	scheduler := syncer.NewScheduler(ghSyncer, &cfg.Mirror)
+
+	// 启动调度器（后台运行）
+	scheduler.Start(ctx)
+	defer scheduler.Stop()
+
+	// 初始化软件业务服务
+	softwareService := service.NewSoftwareService(s3Client, cacheManager)
+
+	// 初始化软件处理器
+	softwareHandler := handler.NewSoftwareHandler(softwareService)
+	syncHandler := handler.NewSyncHandler(scheduler)
+
 	// 设置路由
 	app := router.SetupRouter(fileHandler, searchHandler, corsValidator)
+	router.RegisterMirrorRoutes(app, softwareHandler, syncHandler)
+
+	// 强化 /health 端点（WaveYo Layer0 要求：返回依赖组件状态）
+	app.Get("/health", func(c *fiber.Ctx) error {
+		deps := map[string]string{}
+		if err := util.HealthCheck(c.Context()); err != nil {
+			deps["redis"] = "error: " + err.Error()
+		} else {
+			deps["redis"] = "ok"
+		}
+		s3Status := "ok"
+		// 简单的 S3 可达性检查：尝试 ListObjects 空前缀（1条即可）
+		_, err := s3Client.ListObjects(c.Context(), "")
+		if err != nil {
+			s3Status = "error: " + err.Error()
+		}
+		deps["s3"] = s3Status
+
+		status := "ok"
+		for _, v := range deps {
+			if v != "ok" {
+				status = "degraded"
+				break
+			}
+		}
+		return c.JSON(fiber.Map{
+			"status": status,
+			"deps":   deps,
+		})
+	})
 
 	// 启动服务器（异步）
 	go func() {

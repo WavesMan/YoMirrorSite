@@ -3,7 +3,7 @@ package s3
 import (
 	"strings"
 
-	"s3-file-service/internal/config"
+	"yomirrorsite/internal/config"
 )
 
 // CORSValidator CORS验证器

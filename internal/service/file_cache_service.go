@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"s3-file-service/internal/util"
+	"yomirrorsite/internal/util"
 
 	"go.uber.org/zap"
 )

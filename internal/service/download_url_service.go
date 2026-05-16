@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"s3-file-service/internal/core/s3"
-	"s3-file-service/internal/util"
+	"yomirrorsite/internal/core/s3"
+	"yomirrorsite/internal/util"
 
 	"go.uber.org/zap"
 )

@@ -3,9 +3,9 @@ package handler
 import (
 	"strconv"
 
-	"s3-file-service/api/model"
-	"s3-file-service/internal/service"
-	"s3-file-service/internal/util"
+	"yomirrorsite/api/model"
+	"yomirrorsite/internal/service"
+	"yomirrorsite/internal/util"
 
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"

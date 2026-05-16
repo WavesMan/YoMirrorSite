@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"s3-file-service/internal/util"
+	"yomirrorsite/internal/util"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"go.uber.org/zap"
