@@ -1,62 +1,66 @@
-# YoOSF API 文档
-
-## 概述
-
-S3文件服务是一个基于Go和Gin框架的RESTful API服务，用于管理S3对象存储中的文件。支持文件列表查询、下载URL生成、文件上传等功能。
+# YoMirrorSite API 文档
 
 ## 基础信息
 
-- **基础URL**: `http://localhost:8080`
-- **API前缀**: `/api`
-- **默认端口**: 8080
+- **Base URL**: `http://localhost:8080`
+- **Content-Type**: `application/json`
+- **健康检查**: `GET /health`
 
-## 认证
+## 统一响应格式
 
-当前版本API无需认证，但可以通过配置CORS来限制访问来源。
-
-## API端点
-
-### 健康检查
-
-检查API服务器状态。
-
-**请求**
-- **方法**: GET
-- **路径**: `/health`
-
-**响应**
 ```json
 {
-  "status": "ok"
+  "success": true,
+  "data": {},
+  "error": "",
+  "total": 0
 }
 ```
 
-**示例**
-```bash
-curl "http://localhost:8080/health"
+---
+
+## 健康检查
+
+### GET /health
+
+返回服务及各依赖组件状态。
+
+**响应**:
+```json
+{
+  "status": "ok",
+  "deps": {
+    "redis": "ok",
+    "s3": "ok"
+  }
+}
 ```
+（PostgreSQL 启用时 deps 含 `"postgres":"ok"`）
 
-### 获取文件列表
+---
 
-获取S3存储桶中的文件列表。
+## 文件管理（YoOSF-API 继承）
 
-**请求**
-- **方法**: GET
-- **路径**: `/api/files`
-- **查询参数**:
-  - `prefix` (可选): 文件路径前缀过滤
+### GET /api/files
 
-**响应**
+获取 S3 中的文件列表。
+
+**查询参数**:
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `prefix` | string | 文件路径前缀过滤 |
+
+**响应**:
 ```json
 {
   "success": true,
   "data": {
     "files": [
       {
-        "name": "dist/index.html",
-        "key": "dist/index.html",
-        "size": 6231,
-        "last_modified": "2025-10-04T14:31:10.792Z"
+        "name": "example.zip",
+        "key": "public/example.zip",
+        "size": 1048576,
+        "last_modified": "2026-01-01T00:00:00Z"
       }
     ],
     "count": 1
@@ -64,144 +68,257 @@ curl "http://localhost:8080/health"
 }
 ```
 
-**示例**
-```bash
-# 获取所有文件
-curl "http://localhost:8080/api/files"
+### GET /api/files/url/*
 
-# 获取指定前缀的文件
-curl "http://localhost:8080/api/files?prefix=dist/"
-```
+生成指定文件的预签名下载 URL。
 
-### 获取文件下载URL
+**路径参数**: S3 对象 Key（例如 `/api/files/url/public/example.zip`）
 
-为指定文件生成预签名的下载URL。
+**查询参数**:
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `expires` | int | 3600 | 签名有效期（秒） |
 
-**请求**
-- **方法**: GET
-- **路径**: `/api/files/url/{文件路径}`
-- **路径参数**:
-  - `文件路径`: S3对象的完整路径（支持包含斜杠的路径）
-- **查询参数**:
-  - `expires` (可选): URL过期时间（秒），默认3600秒
-
-**响应**
+**响应**:
 ```json
 {
   "success": true,
   "data": {
-    "url": "https://cn-nb1.rains3.com/ly-test/dist/index.html?X-Amz-Algorithm=...",
+    "url": "https://s3.example.com/bucket/public/example.zip?...",
     "expires_in_seconds": 3600
   }
 }
 ```
 
-**示例**
-```bash
-# 获取文件下载URL（默认1小时过期）
-curl "http://localhost:8080/api/files/url/dist/index.html"
+---
 
-# 获取文件下载URL（30分钟过期）
-curl "http://localhost:8080/api/files/url/dist/index.html?expires=1800"
+## 文件搜索（YoOSF-API 继承）
 
-# 获取子目录中的文件
-curl "http://localhost:8080/api/files/url/dist/css/index-5115566d.css"
-```
+### GET /api/search/files
 
-## 搜索相关API
+按关键字搜索 S3 中的文件。
 
-### 搜索文件
+**查询参数**:
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `keyword` | string | — | 搜索关键词 |
+| `limit` | int | 50 | 返回数量上限 |
 
-在存储桶中全局搜索文件，支持文件名模糊匹配。
-
-**请求**
-- **方法**: GET
-- **路径**: `/api/search/files`
-- **查询参数**:
-  - `keyword` (必需): 搜索关键词
-  - `limit` (可选): 结果数量限制，默认50，最大100
-
-**响应**
+**响应**:
 ```json
 {
   "success": true,
   "data": {
     "results": [
       {
-        "key": "mirror/papermc/paper/1.12.2/paper-1.12.2-1575.jar",
-        "name": "paper-1.12.2-1575.jar",
-        "path": "mirror/papermc/paper/1.12.2/",
-        "size": 40226024,
-        "last_modified": "2025-10-08T11:13:35.335Z",
-        "type": "file"
+        "key": "public/example.zip",
+        "name": "example.zip",
+        "size": 1048576,
+        "last_modified": "2026-01-01T00:00:00Z"
       }
     ],
-    "total_count": 1,
-    "keyword": "1.12",
-    "limit": 50
+    "keyword": "example",
+    "total": 1
   }
 }
 ```
 
-**示例**
-```bash
-# 搜索包含"paper"的文件
-curl "http://localhost:8080/api/search/files?keyword=paper"
+---
 
-# 搜索包含"1.12"的文件，限制10个结果
-curl "http://localhost:8080/api/search/files?keyword=1.12&limit=10"
-```
+## 软件镜像站（YoMirrorSite 新增）
 
-## 错误处理
+### 数据模型
 
-所有API都使用统一的错误响应格式：
-
+#### Software（列表项）
 ```json
 {
-  "success": false,
-  "error": "错误描述信息"
+  "id": "vscode",
+  "name": "Visual Studio Code",
+  "description": "Code editing. Redefined.",
+  "github_repo": "microsoft/vscode",
+  "homepage": "https://code.visualstudio.com",
+  "icon_url": "",
+  "category": "editor",
+  "tags": ["开发工具", "编辑器"],
+  "license": "MIT",
+  "stars": 168000,
+  "latest_ver": "v1.92.0",
+  "total_assets": 12,
+  "updated_at": "2026-01-01T00:00:00Z"
 }
 ```
 
-### 常见错误码
-
-- **400**: 请求参数错误
-- **404**: 资源未找到
-- **500**: 服务器内部错误
-
-## 配置说明
-
-### S3配置
-```yaml
-s3:
-  access_key: "your-access-key"
-  secret_key: "your-secret-key"
-  endpoint: "https://your-s3-endpoint.com"
-  bucket_name: "your-bucket-name"
-  listen_dir: ""  # 监听目录前缀
+#### SoftwareDetail（详情，含版本列表）
+```json
+{
+  "id": "vscode",
+  "name": "Visual Studio Code",
+  "tags": ["开发工具"],
+  "versions": [
+    {
+      "tag_name": "v1.92.0",
+      "name": "August 2024",
+      "prerelease": false,
+      "published_at": "2024-08-01",
+      "asset_count": 3
+    }
+  ],
+  "total_versions": 42,
+  "total_size": 5368709120,
+  "readme_md": "# Visual Studio Code\n..."
+}
 ```
 
-## 使用示例
+#### AssetInfo（下载资产）
+```json
+{
+  "name": "VSCode-win32-x64-1.92.0.zip",
+  "size": 104857600,
+  "size_human": "100.0 MB",
+  "platform": "windows-x64",
+  "content_type": "application/zip",
+  "download_url": "https://s3.example.com/mirrors/vscode/versions/v1.92.0/VSCode-win32-x64-1.92.0.zip?...",
+  "checksum": "abc123...",
+  "downloads": 1234
+}
+```
 
-### 完整工作流程
+---
 
-1. **检查服务状态**
-   ```bash
-   curl "http://localhost:8080/health"
-   ```
+### GET /api/mirror/software
 
-2. **查看可用文件**
-   ```bash
-   curl "http://localhost:8080/api/files"
-   ```
+获取软件列表（分页 + 排序 + 筛选）。
 
-3. **获取文件下载URL**
-   ```bash
-   curl "http://localhost:8080/api/files/url/dist/index.html"
-   ```
+**查询参数**:
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `category` | string | — | 分类筛选 |
+| `keyword` | string | — | 关键词搜索（匹配名称和描述） |
+| `page` | int | 1 | 页码 |
+| `page_size` | int | 20 | 每页数量（最大 100） |
 
-4. **使用URL下载文件**
-   ```bash
-   # 复制返回的URL到浏览器或使用curl下载
-   curl -O "返回的下载URL"
-   ```
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "items": [ { "id": "vscode", ... } ],
+    "page": 1,
+    "page_size": 20,
+    "total_count": 5
+  }
+}
+```
+
+### GET /api/mirror/software/:id
+
+获取软件详情（含版本概要列表）。
+
+**路径参数**: `id` — 软件唯一标识（如 `vscode`）
+
+**响应**: `SoftwareDetail` 对象
+
+### GET /api/mirror/software/:id/versions/:tag
+
+获取指定版本详情（含资产列表和下载 URL）。
+
+**路径参数**: `id` — 软件标识，`tag` — git tag（如 `v1.92.0`）
+
+**查询参数**:
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `expires` | int | 3600 | 下载 URL 签名有效期（秒） |
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "tag_name": "v1.92.0",
+    "name": "August 2024",
+    "body": "## Release Notes\n...",
+    "prerelease": false,
+    "published_at": "2024-08-01T00:00:00Z",
+    "assets": [
+      {
+        "name": "VSCode-win32-x64-1.92.0.zip",
+        "size": 104857600,
+        "size_human": "100.0 MB",
+        "platform": "windows-x64",
+        "download_url": "https://s3.example.com/...?X-Amz-Signature=...",
+        "checksum": "",
+        "downloads": 0
+      }
+    ]
+  }
+}
+```
+
+### GET /api/mirror/software/:id/download/:tag/:asset
+
+下载资产（302 重定向到 S3 预签名 URL）。
+
+**路径参数**: `id` — 软件标识，`tag` — git tag，`asset` — 文件名（URL 编码）
+
+**响应**: HTTP 302 重定向
+
+### GET /api/mirror/stats
+
+获取镜像站统计信息。
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "total_software": 5,
+    "total_versions": 120,
+    "total_assets": 480,
+    "total_size": 53687091200,
+    "last_sync_at": "2026-01-01T00:00:00Z",
+    "sync_in_progress": false
+  }
+}
+```
+
+---
+
+## 同步管理
+
+### GET /api/sync/status
+
+获取当前同步状态。
+
+**响应**:
+```json
+{
+  "success": true,
+  "data": {
+    "in_progress": false,
+    "current_job": "",
+    "queue_length": 0,
+    "last_sync_at": "2026-01-01T00:00:00Z",
+    "last_result": {
+      "software_id": "vscode",
+      "new_versions": 1,
+      "new_assets": 3,
+      "errors": [],
+      "duration": "45s"
+    }
+  }
+}
+```
+
+### POST /api/sync/trigger
+
+手动触发同步。
+
+**请求体**:
+```json
+{
+  "software_id": "vscode"
+}
+```
+`software_id` 为空时触发全量同步。
+
+**响应**: HTTP 200，异步执行同步任务。
