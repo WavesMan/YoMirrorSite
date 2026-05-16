@@ -1,0 +1,29 @@
+[Unit]
+Description=YoMirrorSite API Service — 自由软件镜像站
+Documentation=https://github.com/WavesMan/YoMirrorSite
+After=network.target redis.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=yomirror
+Group=yomirror
+WorkingDirectory=/opt/yomirrorsite
+ExecStart=/opt/yomirrorsite/server
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/yomirrorsite/.env
+
+# 日志输出到 journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yomirrorsite
+
+# 安全加固
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/yomirrorsite/data /opt/yomirrorsite/logs
+
+[Install]
+WantedBy=multi-user.target
