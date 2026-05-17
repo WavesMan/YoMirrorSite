@@ -37,17 +37,8 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 10s
 
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        ports:
-          - "9000:9000"
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-
     env:
+      # MinIO 待 Phase 4 集成测试时加入（需 docker exec 手动启动 minio server）
       PG_HOST: localhost
       PG_PORT: "5432"
       PG_USER: yomirror
@@ -107,7 +98,6 @@ jobs:
       - name: Install & build
         run: |
           cd web
-          pnpm config set workspaces false
           pnpm install
           npx vue-tsc --noEmit
           npx vite build
