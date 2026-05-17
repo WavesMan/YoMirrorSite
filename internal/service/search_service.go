@@ -98,24 +98,3 @@ func (s *SearchService) searchInMemory(fileList []FileInfo, keyword string, limi
 
 	return results
 }
-
-// extractFileName 从文件路径中提取文件名
-func extractFileName(key string) string {
-	// 移除路径前缀，只保留文件名
-	lastSlashIndex := strings.LastIndex(key, "/")
-	if lastSlashIndex == -1 {
-		return key
-	}
-
-	// 如果以斜杠结尾，说明是目录，需要进一步处理
-	if lastSlashIndex == len(key)-1 {
-		trimmed := key[:len(key)-1]
-		lastSlash := strings.LastIndex(trimmed, "/")
-		if lastSlash == -1 {
-			return trimmed
-		}
-		return trimmed[lastSlash+1:]
-	}
-
-	return key[lastSlashIndex+1:]
-}
