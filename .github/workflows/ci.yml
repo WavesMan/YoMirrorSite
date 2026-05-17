@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ============================================================
+  # Go 测试（单元 + 集成 + 覆盖率）
+  # ============================================================
+  test:
+    runs-on: ubuntu-latest
+
+    # GitHub Actions 原生容器，零第三方依赖
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: yomirror_test
+          POSTGRES_USER: yomirror
+          POSTGRES_PASSWORD: test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+
+      minio:
+        image: quay.io/minio/minio
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - "9000:9000"
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+
+    env:
+      PG_HOST: localhost
+      PG_PORT: "5432"
+      PG_USER: yomirror
+      PG_PASSWORD: test
+      PG_DB: yomirror_test
+      REDIS_ADDR: localhost:6379
+      S3_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # --- 阶段 1：单元测试（-short，跳过集成测试）---
+      - name: Unit tests
+        run: |
+          go test ./... -short -coverprofile=unit.out -covermode=atomic -count=1
+
+      # --- 阶段 2：集成测试（build tag integration）---
+      - name: Integration tests
+        run: |
+          go test ./... -tags=integration -coverprofile=integration.out -covermode=atomic -count=1
+
+      # --- 阶段 3：合并覆盖率 + 输出报告 ---
+      - name: Coverage report
+        run: |
+          echo "mode: atomic" > coverage.out
+          tail -n +2 unit.out >> coverage.out
+          tail -n +2 integration.out >> coverage.out
+          go tool cover -func=coverage.out | tee coverage.txt
+
+      # --- 阶段 4：覆盖率摘要（PR comment）---
+      - name: Coverage summary
+        run: |
+          TOTAL=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}')
+          echo "## Coverage: $TOTAL" >> $GITHUB_STEP_SUMMARY
+
+      - name: Go vet
+        run: go vet ./...
+
+  # ============================================================
+  # 前端构建
+  # ============================================================
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Install & build
+        run: |
+          cd web
+          pnpm install
+          npx vue-tsc --noEmit
+          npx vite build

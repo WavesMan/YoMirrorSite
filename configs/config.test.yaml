@@ -1,0 +1,64 @@
+# 测试用 YoMirrorSite 配置
+# 用于 CI 环境和本地集成测试，连接 localhost 服务
+
+server:
+  port: 18080
+  goroutine_pool_size: 10
+  parallel_download_threads: 2
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 1
+
+cache:
+  filesListRefreshIntervalSec: 60
+  local_cache:
+    enabled: true
+    size: 100
+    mode: "lru"
+    hot_data_refresh_sec: 10
+    hot_data_threshold: 3
+
+s3:
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  endpoint: "http://localhost:9000"
+  bucket_name: "yomirror-test"
+  listen_dir: "mirrors/"
+  cors:
+    allowed_origins:
+      - "http://localhost:5173"
+    allowed_methods:
+      - "GET"
+      - "POST"
+    allowed_headers:
+      - "Authorization"
+      - "Content-Type"
+    max_age_seconds: 3600
+
+mirror:
+  software_list:
+    - id: "test-software"
+      name: "Test Software"
+      github_repo: "test-owner/test-repo"
+      category: "test"
+      tags: ["test"]
+      filter_assets:
+        - platform: "test"
+          pattern: "test-*.zip"
+      sync_prerelease: false
+  sync:
+    interval_minutes: 60
+    github_token: ""
+    max_concurrent: 1
+    retry_attempts: 1
+
+postgres:
+  host: "localhost"
+  port: 5432
+  user: "yomirror"
+  password: "test"
+  dbname: "yomirror_test"
+  sslmode: "disable"
+  max_conns: 5
