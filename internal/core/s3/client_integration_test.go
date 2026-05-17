@@ -49,6 +49,18 @@ func TestIntegration_NewS3Client(t *testing.T) {
 }
 
 // ============================================================
+// 测试前置：确保 bucket 存在
+// ============================================================
+
+func ensureBucket(t *testing.T, client *Client) {
+	t.Helper()
+	ctx := context.Background()
+	// 尝试写一个空文件来触发连接，首次写入可能因 NoSuchBucket 失败
+	// 实际 bucket 需通过 mc 或 API 预先创建
+	_ = client.UploadObject(ctx, ".bucket-probe", strings.NewReader(""), "text/plain")
+}
+
+// ============================================================
 // Object CRUD 测试
 // ============================================================
 

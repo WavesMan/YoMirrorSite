@@ -67,10 +67,14 @@ jobs:
           docker run -d --name minio-int \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
             -p 9000:9000 minio/minio server /data --quiet
-          sleep 3
+          sleep 5
           curl -sf http://localhost:9000/minio/health/live
-          docker exec minio-int mc alias set local http://localhost:9000 minioadmin minioadmin
-          docker exec minio-int mc mb local/yomirror-test --ignore-existing
+      - name: Create MinIO bucket
+        run: |
+          docker run --rm --network host minio/mc \
+            alias set local http://localhost:9000 minioadmin minioadmin
+          docker run --rm --network host minio/mc \
+            mb local/yomirror-test --ignore-existing
 
       # --- 阶段 2：集成测试（build tag integration）---
       - name: Integration tests
