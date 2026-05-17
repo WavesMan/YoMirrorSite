@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/*]
   pull_request:
     branches: [main]
 
@@ -38,7 +38,7 @@ jobs:
           --health-interval 10s
 
       minio:
-        image: quay.io/minio/minio
+        image: bitnami/minio:latest
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin
@@ -46,7 +46,6 @@ jobs:
           - "9000:9000"
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
 
     env:
       PG_HOST: localhost
@@ -105,10 +104,10 @@ jobs:
       - uses: pnpm/action-setup@v3
         with:
           version: 8
-
       - name: Install & build
         run: |
           cd web
+          pnpm config set workspaces false
           pnpm install
           npx vue-tsc --noEmit
           npx vite build
