@@ -23,6 +23,9 @@ node_modules/
 logs/
 *.log
 
+# AI Studio Demo（独立项目，不入库）
+web/yomirrorsite-demo/
+
 # AI 会话临时文件
 chat_export_*.md
 session_*.json
