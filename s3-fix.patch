@@ -1,0 +1,13 @@
+--- a/internal/core/s3/client.go
++++ b/internal/core/s3/client.go
+@@ -34,7 +34,9 @@
+ 	}
+ 
+ 	awsCfg := cfg.AWSConfig()
+-	client := s3.NewFromConfig(awsCfg)
++	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
++		o.UsePathStyle = true
++	})
+ 
+ 	return &Client{
+ 		client:     client,

@@ -7,7 +7,6 @@ package s3
 
 import (
 	"context"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +40,17 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+var testS3Client *Client
+
+func TestMain(m *testing.M) {
+	cfg := testS3Config()
+	testS3Client = NewClient(cfg)
+	// 确保测试 bucket 存在
+	testS3Client.client.CreateBucket(context.Background(),
+		&s3.CreateBucketInput{Bucket: aws.String(cfg.BucketName)})
+	os.Exit(m.Run())
+}
+
 // ============================================================
 // Client 创建测试
 // ============================================================
@@ -50,27 +59,6 @@ func TestIntegration_NewS3Client(t *testing.T) {
 	cfg := testS3Config()
 	client := NewClient(cfg)
 	assert.NotNil(t, client)
-}
-
-// ============================================================
-// 测试前置：确保 bucket 存在
-// ============================================================
-
-func ensureBucket(t *testing.T, client *Client) {
-	t.Helper()
-	ctx := context.Background()
-	// 使用 S3 CreateBucket API 确保测试 bucket 存在
-	_, err := client.client.CreateBucket(ctx, &s3.CreateBucketInput{
-		Bucket: aws.String(client.bucketName),
-	})
-	if err != nil {
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "BucketAlreadyExists" {
-			return // bucket 已存在，无需创建
-		}
-		// 其他错误（如权限问题）不阻塞测试，上传时再报错
-		t.Logf("ensureBucket: %v", err)
-	}
 }
 
 // ============================================================

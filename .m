@@ -1,0 +1,1 @@
+fix: S3 UsePathStyle for MinIO + TestMain creates bucket

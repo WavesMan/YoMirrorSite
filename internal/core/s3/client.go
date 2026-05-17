@@ -34,7 +34,9 @@ func NewClient(cfg *config.S3Config) *Client {
 	}
 
 	awsCfg := cfg.AWSConfig()
-	client := s3.NewFromConfig(awsCfg)
+	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.UsePathStyle = true
+	})
 
 	return &Client{
 		client:     client,
