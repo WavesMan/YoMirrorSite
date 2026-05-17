@@ -1,9 +1,6 @@
 version: "3.8"
 
 services:
-  # ============================================================
-  # YoMirrorSite 主应用
-  # ============================================================
   app:
     build: .
     ports:
@@ -22,9 +19,6 @@ services:
     environment:
       - REDIS_ADDR=redis:6379
 
-  # ============================================================
-  # Redis 缓存
-  # ============================================================
   redis:
     image: redis:7-alpine
     volumes:
@@ -36,17 +30,15 @@ services:
       timeout: 5s
       retries: 3
 
-  # ============================================================
-  # PostgreSQL 持久化存储
-  # ============================================================
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: yomirror
       POSTGRES_USER: yomirror
-      POSTGRES_PASSWORD: ${PG_PASSWORD:-yomirror}
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD is required}
+    # 生产环境不暴露数据库端口到宿主机
+    # ports:
+    #   - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
