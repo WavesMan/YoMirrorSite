@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"yomirrorsite/api/model"
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/util"
 
@@ -62,22 +63,14 @@ func (s *FileService) InitDownloadURLManager(workerCount int, queueSize int) {
 		zap.Int("queue_size", queueSize))
 }
 
-// FileInfo 文件信息
-type FileInfo struct {
-	Name         string    `json:"name"`
-	Key          string    `json:"key"`
-	Size         int64     `json:"size"`
-	LastModified time.Time `json:"last_modified"`
-}
-
 // GetFileList 获取文件列表（带防击穿保护）
-func (s *FileService) GetFileList(ctx context.Context, prefix string) ([]FileInfo, error) {
+func (s *FileService) GetFileList(ctx context.Context, prefix string) ([]model.FileInfo, error) {
 	cacheKey := cacheKeyPrefix + prefix
 
 	// 1. 先尝试从本地缓存获取
 	if s.localCacheManager != nil {
 		if value, found := s.localCacheManager.Get(cacheKey); found {
-			if fileList, ok := value.([]FileInfo); ok {
+			if fileList, ok := value.([]model.FileInfo); ok {
 				// 记录热点数据访问
 				if s.hotDataManager != nil {
 					s.hotDataManager.RecordAccess(cacheKey)
@@ -127,7 +120,7 @@ func (s *FileService) GetFileList(ctx context.Context, prefix string) ([]FileInf
 }
 
 // queryAndCacheFileList 查询 OSS 并缓存
-func (s *FileService) queryAndCacheFileList(ctx context.Context, prefix, cacheKey string) ([]FileInfo, error) {
+func (s *FileService) queryAndCacheFileList(ctx context.Context, prefix, cacheKey string) ([]model.FileInfo, error) {
 	fileList, err := s.queryService.queryAndCacheFileList(ctx, prefix, cacheKey, s.cacheService)
 	if err == nil && s.localCacheManager != nil {
 		// 将数据存入本地缓存

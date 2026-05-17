@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"yomirrorsite/api/model"
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/util"
 
@@ -22,20 +23,20 @@ func NewFileQueryService(s3Client *s3.Client) *FileQueryService {
 }
 
 // queryFileListWithoutCache 查询文件列表但不缓存（降级策略）
-func (s *FileQueryService) queryFileListWithoutCache(ctx context.Context, prefix string) ([]FileInfo, error) {
+func (s *FileQueryService) queryFileListWithoutCache(ctx context.Context, prefix string) ([]model.FileInfo, error) {
 	objects, err := s.s3Client.ListObjects(ctx, prefix)
 	if err != nil {
 		util.Error("Failed to list S3 objects", zap.String("prefix", prefix), zap.Error(err))
 		return nil, err
 	}
 
-	var fileList []FileInfo
+	var fileList []model.FileInfo
 	for _, obj := range objects {
 		// 过滤掉目录样式的对象，通常是 Size==0 且 Key 以 '/' 结尾
 		if *obj.Size == 0 && (*obj.Key)[len(*obj.Key)-1] == '/' {
 			continue
 		}
-		fileList = append(fileList, FileInfo{
+		fileList = append(fileList, model.FileInfo{
 			Name:         *obj.Key,
 			Key:          *obj.Key,
 			Size:         *obj.Size,
@@ -48,20 +49,20 @@ func (s *FileQueryService) queryFileListWithoutCache(ctx context.Context, prefix
 }
 
 // queryAndCacheFileList 查询 OSS 并缓存
-func (s *FileQueryService) queryAndCacheFileList(ctx context.Context, prefix, cacheKey string, cacheService *FileCacheService) ([]FileInfo, error) {
+func (s *FileQueryService) queryAndCacheFileList(ctx context.Context, prefix, cacheKey string, cacheService *FileCacheService) ([]model.FileInfo, error) {
 	objects, err := s.s3Client.ListObjects(ctx, prefix)
 	if err != nil {
 		util.Error("Failed to list S3 objects", zap.String("prefix", prefix), zap.Error(err))
 		return nil, err
 	}
 
-	var fileList []FileInfo
+	var fileList []model.FileInfo
 	for _, obj := range objects {
 		// 过滤掉目录样式的对象，通常是 Size==0 且 Key 以 '/' 结尾
 		if *obj.Size == 0 && (*obj.Key)[len(*obj.Key)-1] == '/' {
 			continue
 		}
-		fileList = append(fileList, FileInfo{
+		fileList = append(fileList, model.FileInfo{
 			Name:         *obj.Key,
 			Key:          *obj.Key,
 			Size:         *obj.Size,
