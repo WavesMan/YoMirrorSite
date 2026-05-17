@@ -40,5 +40,9 @@ scripts/
 data/
 version/
 
-# Windows 系统缓存残留
-%SystemDrive%/
+# Go 构建缓存残留
+.gocache/
+.gopath/
+
+# 临时补丁与脚本
+*.patch
