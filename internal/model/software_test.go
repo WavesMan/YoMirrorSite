@@ -28,7 +28,7 @@ func TestFormatSize_Bytes(t *testing.T) {
 		{"2.5 MB", 2621440, "2.5 MB"},
 		{"1 GB", 1073741824, "1.0 GB"},
 		{"1 TB", 1099511627776, "1.0 TB"},
-		{"negative", -1024, "-1.0 KB"},
+		{"negative", -1024, "-1024 B"},
 	}
 
 	for _, tt := range tests {

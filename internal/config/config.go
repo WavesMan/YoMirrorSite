@@ -3,7 +3,7 @@ package config
 import (
 	"context"
 	"fmt"
-	"strings"
+	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
@@ -234,9 +234,11 @@ func (c *PostgresConfig) ApplyDefaults() {
 }
 
 // MatchAssetName 检查资产文件名是否匹配任一过滤规则
+// 支持 * 通配符匹配（使用 filepath.Match）
 func (sw *SoftwareConfig) MatchAssetName(name string) bool {
 	for _, f := range sw.FilterAssets {
-		if strings.Contains(name, strings.Trim(f.Pattern, "*")) {
+		matched, err := filepath.Match(f.Pattern, name)
+		if err == nil && matched {
 			return true
 		}
 	}

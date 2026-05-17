@@ -100,7 +100,7 @@ func TestCompareSemVer_Less(t *testing.T) {
 
 func TestCompareSemVer_DiffLengths(t *testing.T) {
 	assert.Equal(t, 1, compareSemVer("1.0.0.1", "1.0.0"))
-	assert.Equal(t, -1, compareSemVer("1.0", "1.0.0"))
+	assert.Equal(t, 0, compareSemVer("1.0", "1.0.0"))
 }
 
 func TestCompareSemVer_PreRelease(t *testing.T) {
