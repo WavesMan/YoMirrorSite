@@ -62,6 +62,14 @@ jobs:
         run: |
           go test ./... -short -coverprofile=unit.out -covermode=atomic -count=1
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio-int \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            -p 9000:9000 minio/minio server /data --quiet
+          sleep 3
+          curl -sf http://localhost:9000/minio/health/live
+
       # --- 阶段 2：集成测试（build tag integration）---
       - name: Integration tests
         run: |
