@@ -58,12 +58,32 @@ jobs:
 
       - name: Integration tests with MinIO
         run: |
+          echo "=== 1. Start MinIO container ==="
           docker run -d --name minio-int \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
             -p 9000:9000 minio/minio server /data --quiet
           sleep 5
-          curl -sf http://localhost:9000/minio/health/live
+
+          echo "=== 2. Docker ps ==="
+          docker ps -a --filter name=minio-int
+
+          echo "=== 3. MinIO container logs ==="
+          docker logs minio-int 2>&1 | tail -20
+
+          echo "=== 4. Port check ==="
+          docker port minio-int 2>&1
+          ss -tlnp | grep 9000 || netstat -tlnp 2>/dev/null | grep 9000 || echo "no port tool"
+
+          echo "=== 5. HTTP health check ==="
+          curl -v http://localhost:9000/minio/health/live 2>&1 || echo "HEALTH FAIL"
+
+          echo "=== 6. Raw S3 API test (list buckets) ==="
+          curl -v http://localhost:9000/ 2>&1 | head -30
+
+          echo "=== 7. Run integration tests ==="
           go test ./... -tags=integration -coverprofile=integration.out -covermode=atomic -count=1
+
+          echo "=== 8. Stop MinIO ==="
           docker stop minio-int && docker rm minio-int
 
       - name: Coverage report
