@@ -7,12 +7,16 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
 	"yomirrorsite/internal/config"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -55,9 +59,18 @@ func TestIntegration_NewS3Client(t *testing.T) {
 func ensureBucket(t *testing.T, client *Client) {
 	t.Helper()
 	ctx := context.Background()
-	// 尝试写一个空文件来触发连接，首次写入可能因 NoSuchBucket 失败
-	// 实际 bucket 需通过 mc 或 API 预先创建
-	_ = client.UploadObject(ctx, ".bucket-probe", strings.NewReader(""), "text/plain")
+	// 使用 S3 CreateBucket API 确保测试 bucket 存在
+	_, err := client.client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(client.bucketName),
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "BucketAlreadyExists" {
+			return // bucket 已存在，无需创建
+		}
+		// 其他错误（如权限问题）不阻塞测试，上传时再报错
+		t.Logf("ensureBucket: %v", err)
+	}
 }
 
 // ============================================================
