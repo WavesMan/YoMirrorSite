@@ -46,3 +46,6 @@ version/
 
 # 临时补丁与脚本
 *.patch
+
+# Windows 系统缓存残留（字面目录名，非环境变量展开）
+%SystemDrive%/

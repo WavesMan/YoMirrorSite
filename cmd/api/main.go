@@ -44,11 +44,10 @@ func main() {
 		util.Fatal("Invalid configuration", zap.Error(err))
 	}
 
-	// 调试：检查S3配置
+	// 调试：检查S3配置（不记录敏感凭证）
 	util.Debug("S3 config loaded",
 		zap.String("bucket_name", cfg.S3.BucketName),
 		zap.String("endpoint", cfg.S3.Endpoint),
-		zap.String("access_key", cfg.S3.AccessKey),
 		zap.String("listen_dir", cfg.S3.ListenDir),
 	)
 
@@ -59,7 +58,8 @@ func main() {
 	defer util.ReleaseGoroutinePool()
 
 	// 初始化Redis客户端
-	util.InitRedisClient(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
+	util.InitRedisClient(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB,
+		cfg.Redis.UseTLS, cfg.Redis.InsecureSkipVerify)
 	defer util.CloseRedisClient()
 
 	ctx := context.Background()
