@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -28,7 +29,7 @@ type LocalCacheStats struct {
 }
 
 // NewCacheManager 创建缓存管理器
-func NewCacheManager(size int, mode string) *CacheManager {
+func NewCacheManager(size int, mode string) (*CacheManager, error) {
 	stats := &LocalCacheStats{
 		LastUpdated: time.Now(),
 	}
@@ -36,21 +37,21 @@ func NewCacheManager(size int, mode string) *CacheManager {
 	if mode == "lru" {
 		cache, err := lru.New[string, any](size)
 		if err != nil {
-			panic(err)
+			return nil, fmt.Errorf("create LRU cache failed: %w", err)
 		}
 		return &CacheManager{
 			LRUCache: cache,
 			mode:     mode,
 			stats:    stats,
-		}
+		}, nil
 	} else if mode == "lfu" {
 		return &CacheManager{
 			LFUCache: NewLFUCache(size),
 			mode:     mode,
 			stats:    stats,
-		}
+		}, nil
 	} else {
-		panic("Invalid cache mode. Only 'lru' or 'lfu' are supported.")
+		return nil, fmt.Errorf("invalid cache mode %q, only 'lru' or 'lfu' are supported", mode)
 	}
 }
 

@@ -106,6 +106,11 @@ func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword st
 			return nil, fmt.Errorf("加载软件列表失败: %w", err)
 		}
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					util.Error("异步缓存回写 panic", zap.Any("panic", r), util.Module("service"))
+				}
+			}()
 			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			_ = util.SetJSON(bgCtx, softwareListKey, allSoftware, softwareListCacheTTL)
@@ -154,6 +159,11 @@ func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*
 			versions, _ := s.pgClient.ListVersionsBySoftware(ctx, softwareID, 0)
 			detail := s.assembleDetail(sw, tags, versions)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						util.Error("异步缓存回写 panic", zap.Any("panic", r), util.Module("service"))
+					}
+				}()
 				cacheKey := softwareDetailKeyPrefix + softwareID
 				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -195,6 +205,11 @@ func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*
 
 	// 4. 异步写回 Redis
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				util.Error("异步缓存回写 panic", zap.Any("panic", r), util.Module("service"))
+			}
+		}()
 		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = util.SetJSON(bgCtx, cacheKey, detail, softwareDetailCacheTTL)

@@ -181,7 +181,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		// PG 持久化：先 upsert version 获取 ID，再同步资产时关联
 		var versionID int
 		if s.pgClient != nil && s.pgClient.IsEnabled() {
-			versionID, _ = s.pgClient.UpsertVersion(ctx, &model.VersionTable{
+			vid, err := s.pgClient.UpsertVersion(ctx, &model.VersionTable{
 				SoftwareID:  swCfg.ID,
 				TagName:     release.TagName,
 				Name:        release.Name,
@@ -189,6 +189,13 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 				PublishedAt: release.PublishedAt,
 				Body:        release.Body,
 			})
+			if err != nil {
+				util.Warn("UpsertVersion 失败，资产外键将为空",
+					zap.String("software", swCfg.ID),
+					zap.String("tag", release.TagName),
+					zap.Error(err))
+			}
+			versionID = vid
 		}
 
 		// 同步该版本的资产

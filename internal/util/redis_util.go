@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +74,9 @@ func FromJSON(data []byte, dest interface{}) error {
 
 // SetJSON 设置 JSON 格式缓存
 func SetJSON(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	jsonData, err := ToJSON(value)
 	if err != nil {
 		return err
@@ -82,6 +86,9 @@ func SetJSON(ctx context.Context, key string, value interface{}, expiration time
 
 // GetJSON 获取 JSON 格式缓存
 func GetJSON(ctx context.Context, key string, dest interface{}) (bool, error) {
+	if RedisClient == nil {
+		return false, fmt.Errorf("redis client not initialized")
+	}
 	data, err := RedisClient.Get(ctx, key).Bytes()
 	if err == redis.Nil {
 		return false, nil
@@ -96,6 +103,9 @@ func GetJSON(ctx context.Context, key string, dest interface{}) (bool, error) {
 
 // Delete 删除缓存
 func Delete(ctx context.Context, key string) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	return RedisClient.Del(ctx, key).Err()
 }
 

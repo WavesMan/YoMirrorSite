@@ -67,10 +67,16 @@ func main() {
 	// 初始化本地缓存管理器
 	var cacheManager *util.CacheManager
 	if cfg.Cache.LocalCache.Enabled {
-		cacheManager = util.NewCacheManager(cfg.Cache.LocalCache.Size, cfg.Cache.LocalCache.Mode)
-		util.Info("Local cache manager initialized",
-			zap.Int("size", cfg.Cache.LocalCache.Size),
-			zap.String("mode", cfg.Cache.LocalCache.Mode))
+		var err error
+		cacheManager, err = util.NewCacheManager(cfg.Cache.LocalCache.Size, cfg.Cache.LocalCache.Mode)
+		if err != nil {
+			util.Warn("本地缓存初始化失败，降级到无本地缓存模式", zap.Error(err))
+			cacheManager = nil
+		} else {
+			util.Info("Local cache manager initialized",
+				zap.Int("size", cfg.Cache.LocalCache.Size),
+				zap.String("mode", cfg.Cache.LocalCache.Mode))
+		}
 	} else {
 		util.Info("Local cache is disabled")
 	}
@@ -220,20 +226,21 @@ func startDynamicCacheLoader(cacheManager *util.CacheManager, fileService *servi
 
 		// 示例：预加载一些常用数据
 		hotKeys := []string{"files_list_cache:", "files_list_cache:papermc", "files_list_cache:purpur"}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
-		for _, key := range hotKeys {
-			// 如果本地缓存中没有该数据，尝试从Redis加载
-			if !cacheManager.Contains(key) {
-				prefix := key[len("files_list_cache:"):]
-				fileList, err := fileService.GetFileList(ctx, prefix)
-				if err == nil {
-					cacheManager.Set(key, fileList)
-					util.Debug("Preloaded hot data to local cache", zap.String("key", key), zap.Int("count", len(fileList)))
+			for _, key := range hotKeys {
+				// 如果本地缓存中没有该数据，尝试从Redis加载
+				if !cacheManager.Contains(key) {
+					prefix := key[len("files_list_cache:"):]
+					fileList, err := fileService.GetFileList(ctx, prefix)
+					if err == nil {
+						cacheManager.Set(key, fileList)
+						util.Debug("Preloaded hot data to local cache", zap.String("key", key), zap.Int("count", len(fileList)))
+					}
 				}
 			}
-		}
-
-		cancel()
+		}()
 	}
 }
