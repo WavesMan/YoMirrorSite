@@ -58,6 +58,14 @@ jobs:
 
       - name: Integration tests with MinIO
         run: |
+          echo "============================================"
+          echo "DIAG: MinIO credentials and config"
+          echo "  endpoint:  $S3_ENDPOINT"
+          echo "  bucket:    yomirror-test"
+          echo "  access_key: $S3_ACCESS_KEY"
+          echo "  secret_key: $S3_SECRET_KEY"
+          echo "============================================"
+
           echo "=== 1. Start MinIO container ==="
           docker run -d --name minio-int \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
@@ -67,18 +75,18 @@ jobs:
           echo "=== 2. Docker ps ==="
           docker ps -a --filter name=minio-int
 
-          echo "=== 3. MinIO container logs ==="
+          echo "=== 3. MinIO container logs (last 20 lines) ==="
           docker logs minio-int 2>&1 | tail -20
 
           echo "=== 4. Port check ==="
           docker port minio-int 2>&1
-          ss -tlnp | grep 9000 || netstat -tlnp 2>/dev/null | grep 9000 || echo "no port tool"
+          ss -tlnp 2>/dev/null | grep 9000 || netstat -tlnp 2>/dev/null | grep 9000 || echo "(no port tool)"
 
-          echo "=== 5. HTTP health check ==="
-          curl -v http://localhost:9000/minio/health/live 2>&1 || echo "HEALTH FAIL"
+          echo "=== 5. HTTP health check (verbose) ==="
+          curl -v http://localhost:9000/minio/health/live 2>&1 || echo "HEALTH_CHECK_FAILED"
 
-          echo "=== 6. Raw S3 API test (list buckets) ==="
-          curl -v http://localhost:9000/ 2>&1 | head -30
+          echo "=== 6. S3 ListBuckets via curl ==="
+          curl -s http://localhost:9000/ 2>&1 | head -20
 
           echo "=== 7. Run integration tests ==="
           go test ./... -tags=integration -coverprofile=integration.out -covermode=atomic -count=1
