@@ -12,11 +12,24 @@ import (
 	"go.uber.org/zap"
 )
 
+// ProxyTestURL 代理可用性检测地址
+// 默认使用本地 MinIO 健康检查端点，避免依赖外网且不泄露检测意图
+// 可通过环境变量 PROXY_TEST_URL 覆盖
+var ProxyTestURL = getEnvDefault("PROXY_TEST_URL", "http://localhost:9000/minio/health/live")
+
 // ProxyConfig 代理配置
 type ProxyConfig struct {
 	HTTPProxy  string
 	HTTPSProxy string
 	NoProxy    string
+}
+
+// getEnvDefault 获取环境变量，不存在时返回默认值
+func getEnvDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // GetSystemProxy 获取系统代理配置
@@ -125,7 +138,7 @@ func isProxyAvailable(proxyURL string) bool {
 	}
 
 	// 测试连接
-	resp, err := client.Get("http://www.google.com/generate_204")
+	resp, err := client.Get(ProxyTestURL)
 	if err != nil {
 		return false
 	}
