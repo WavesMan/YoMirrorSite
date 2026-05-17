@@ -181,10 +181,11 @@ func TestIntegration_SaveAndGetTags(t *testing.T) {
 // ============================================================
 
 func cleanupDB(client *Client) {
-	client.DB.Exec("DELETE FROM software_tags")
-	client.DB.Exec("DELETE FROM assets")
-	client.DB.Exec("DELETE FROM versions")
-	client.DB.Exec("DELETE FROM softwares")
-	client.DB.Exec("DELETE FROM sync_logs")
-	// 不删除表，保留 schema
+	// PG 不支持 DELETE IF EXISTS，用 hasTable 判断避免报错
+	tables := []string{"software_tags", "assets", "versions", "softwares", "sync_logs"}
+	for _, t := range tables {
+		if client.DB.Migrator().HasTable(t) {
+			client.DB.Exec("DELETE FROM " + t)
+		}
+	}
 }
