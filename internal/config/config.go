@@ -46,6 +46,8 @@ type CORSConfig struct {
 // RedisConfig Redis配置
 type RedisConfig struct {
 	Addr     string `yaml:"addr"`
+	UseTLS             bool   `yaml:"use_tls"`              // 启用 TLS 连接
+	InsecureSkipVerify bool   `yaml:"tls_insecure_skip"`    // 跳过证书校检（仅开发环境）
 	Password string `yaml:"password"`
 	DB       int    `yaml:"db"`
 }

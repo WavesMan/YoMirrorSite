@@ -59,13 +59,7 @@ func SetupRouter(fileHandler *handler.FileHandler, searchHandler *handler.Search
 		}
 	}
 
-	// 健康检查（基础版，具体依赖检查在 main.go 中覆盖）
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"status": "ok",
-		})
-	})
-
+	// 健康检查由 main.go 统一注册（含依赖组件状态）
 	// 配置前端路由，支持SPA应用
 	app.Use(func(c *fiber.Ctx) error {
 		// 检查请求是否为API请求

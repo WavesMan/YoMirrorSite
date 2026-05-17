@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -15,16 +16,23 @@ import (
 var RedisClient *redis.Client
 
 // InitRedisClient 初始化 Redis 客户端
-func InitRedisClient(addr, password string, db int) {
-	RedisClient = redis.NewClient(&redis.Options{
+// useTLS：是否启用 TLS；insecureSkip：是否跳过证书校检（仅开发/内网环境）
+func InitRedisClient(addr, password string, db int, useTLS, insecureSkip bool) {
+	opts := &redis.Options{
 		Addr:         addr,
 		Password:     password,
 		DB:           db,
-		TLSConfig:    &tls.Config{InsecureSkipVerify: true},
 		DialTimeout:  10 * time.Second,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
-	})
+	}
+	if useTLS {
+		opts.TLSConfig = &tls.Config{InsecureSkipVerify: insecureSkip}
+		if insecureSkip {
+			Warn("Redis TLS 证书校检已跳过，仅适用于开发/内网环境")
+		}
+	}
+	RedisClient = redis.NewClient(opts)
 
 	// 测试连接
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -66,6 +74,9 @@ func FromJSON(data []byte, dest interface{}) error {
 
 // SetJSON 设置 JSON 格式缓存
 func SetJSON(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	jsonData, err := ToJSON(value)
 	if err != nil {
 		return err
@@ -75,6 +86,9 @@ func SetJSON(ctx context.Context, key string, value interface{}, expiration time
 
 // GetJSON 获取 JSON 格式缓存
 func GetJSON(ctx context.Context, key string, dest interface{}) (bool, error) {
+	if RedisClient == nil {
+		return false, fmt.Errorf("redis client not initialized")
+	}
 	data, err := RedisClient.Get(ctx, key).Bytes()
 	if err == redis.Nil {
 		return false, nil
@@ -89,6 +103,9 @@ func GetJSON(ctx context.Context, key string, dest interface{}) (bool, error) {
 
 // Delete 删除缓存
 func Delete(ctx context.Context, key string) error {
+	if RedisClient == nil {
+		return fmt.Errorf("redis client not initialized")
+	}
 	return RedisClient.Del(ctx, key).Err()
 }
 
