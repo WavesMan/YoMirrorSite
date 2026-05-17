@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"yomirrorsite/api/model"
 	"yomirrorsite/internal/core/s3"
 	"yomirrorsite/internal/util"
 
@@ -24,7 +25,7 @@ func NewSearchService(s3Client *s3.Client) *SearchService {
 }
 
 // SearchFiles 搜索文件（基于文件列表缓存）
-func (s *SearchService) SearchFiles(ctx context.Context, keyword string, limit int) ([]FileInfo, error) {
+func (s *SearchService) SearchFiles(ctx context.Context, keyword string, limit int) ([]model.FileInfo, error) {
 	util.Info("Searching files", zap.String("keyword", keyword), zap.Int("limit", limit))
 
 	// 验证参数
@@ -52,7 +53,7 @@ func (s *SearchService) SearchFiles(ctx context.Context, keyword string, limit i
 }
 
 // getFileListFromCache 从文件列表缓存获取数据
-func (s *SearchService) getFileListFromCache(ctx context.Context, prefix string) ([]FileInfo, error) {
+func (s *SearchService) getFileListFromCache(ctx context.Context, prefix string) ([]model.FileInfo, error) {
 	cacheKey := "files_list_cache:" + prefix
 
 	// 读取元数据获取分片数量
@@ -63,10 +64,10 @@ func (s *SearchService) getFileListFromCache(ctx context.Context, prefix string)
 	}
 
 	// 读取所有分片数据
-	var fullList []FileInfo
+	var fullList []model.FileInfo
 	for i := 0; i < shardCount; i++ {
 		shardKey := fmt.Sprintf("%s:shard:%d", cacheKey, i)
-		var shardData []FileInfo
+		var shardData []model.FileInfo
 		found, err := util.GetJSON(ctx, shardKey, &shardData)
 		if err != nil || !found {
 			return nil, fmt.Errorf("shard cache missing: %s", shardKey)
@@ -78,8 +79,8 @@ func (s *SearchService) getFileListFromCache(ctx context.Context, prefix string)
 }
 
 // searchInMemory 在内存中执行搜索
-func (s *SearchService) searchInMemory(fileList []FileInfo, keyword string, limit int) []FileInfo {
-	var results []FileInfo
+func (s *SearchService) searchInMemory(fileList []model.FileInfo, keyword string, limit int) []model.FileInfo {
+	var results []model.FileInfo
 	keyword = strings.ToLower(keyword)
 
 	// 遍历文件列表进行关键词匹配

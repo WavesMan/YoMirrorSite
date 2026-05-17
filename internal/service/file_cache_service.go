@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"yomirrorsite/api/model"
 	"yomirrorsite/internal/util"
 
 	"go.uber.org/zap"
@@ -23,7 +24,7 @@ func NewFileCacheService(fileService *FileService) *FileCacheService {
 }
 
 // cacheFileListInShards 分片写缓存
-func (s *FileCacheService) cacheFileListInShards(ctx context.Context, prefix string, fileList []FileInfo) error {
+func (s *FileCacheService) cacheFileListInShards(ctx context.Context, prefix string, fileList []model.FileInfo) error {
 	shardCount := (len(fileList) + 100 - 1) / 100 // shardSize = 100
 	metaKey := "files_list_cache:" + prefix
 
@@ -52,7 +53,7 @@ func (s *FileCacheService) cacheFileListInShards(ctx context.Context, prefix str
 }
 
 // readFileListFromShards 分片读缓存
-func (s *FileCacheService) readFileListFromShards(ctx context.Context, prefix string) ([]FileInfo, bool, error) {
+func (s *FileCacheService) readFileListFromShards(ctx context.Context, prefix string) ([]model.FileInfo, bool, error) {
 	metaKey := "files_list_cache:" + prefix
 
 	var shardCount int
@@ -61,10 +62,10 @@ func (s *FileCacheService) readFileListFromShards(ctx context.Context, prefix st
 		return nil, false, err
 	}
 
-	var fullList []FileInfo
+	var fullList []model.FileInfo
 	for i := 0; i < shardCount; i++ {
 		shardKey := fmt.Sprintf("%s:shard:%d", metaKey, i)
-		var shardData []FileInfo
+		var shardData []model.FileInfo
 		found, err := util.GetJSON(ctx, shardKey, &shardData)
 		if err != nil || !found {
 			// 某分片缺失，缓存不完整，需要刷新整缓存
