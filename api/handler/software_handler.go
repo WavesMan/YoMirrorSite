@@ -160,7 +160,7 @@ func (h *SoftwareHandler) GetDownloadURL(c *fiber.Ctx) error {
 // GetStats 获取镜像站统计
 // GET /api/mirror/stats
 func (h *SoftwareHandler) GetStats(c *fiber.Ctx) error {
-	util.Info("统计请求", util.Module("handler"), )
+	util.Info("统计请求", util.Module("handler"))
 	stats, err := h.softwareService.GetStats(c.Context())
 	if err != nil {
 		util.Error("获取统计信息失败", zap.Error(err))

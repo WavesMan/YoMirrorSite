@@ -97,6 +97,8 @@ func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword st
 	found, err := util.GetJSON(ctx, softwareListKey, &allSoftware)
 	if err != nil {
 		util.Warn("从 Redis 读取软件列表失败，降级到 S3", zap.Error(err))
+		// 错误时仍尝试 S3 加载，避免因 Redis 临时故障导致服务不可用
+		found = false
 	}
 	if !found {
 		allSoftware, err = s.loadSoftwareListFromS3(ctx)
@@ -104,7 +106,9 @@ func (s *SoftwareService) ListSoftware(ctx context.Context, category, keyword st
 			return nil, fmt.Errorf("加载软件列表失败: %w", err)
 		}
 		go func() {
-			_ = util.SetJSON(context.Background(), softwareListKey, allSoftware, softwareListCacheTTL)
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = util.SetJSON(bgCtx, softwareListKey, allSoftware, softwareListCacheTTL)
 		}()
 	}
 
@@ -151,7 +155,9 @@ func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*
 			detail := s.assembleDetail(sw, tags, versions)
 			go func() {
 				cacheKey := softwareDetailKeyPrefix + softwareID
-				_ = util.SetJSON(context.Background(), cacheKey, detail, softwareDetailCacheTTL)
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = util.SetJSON(bgCtx, cacheKey, detail, softwareDetailCacheTTL)
 			}()
 			util.Debug("PG 查询软件详情成功", util.Module("service"), util.Software(softwareID), util.Action("detail"))
 			return &detail, nil
@@ -189,7 +195,9 @@ func (s *SoftwareService) GetSoftware(ctx context.Context, softwareID string) (*
 
 	// 4. 异步写回 Redis
 	go func() {
-		_ = util.SetJSON(context.Background(), cacheKey, detail, softwareDetailCacheTTL)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = util.SetJSON(bgCtx, cacheKey, detail, softwareDetailCacheTTL)
 	}()
 
 	return &detail, nil

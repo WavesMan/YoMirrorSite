@@ -45,20 +45,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to decode config: %w", err)
 	}
 
-	// 调试：打印加载的配置信息
-	fmt.Printf("DEBUG: Loaded config from: %s\n", cleanPath)
-	fmt.Printf("DEBUG: S3 BucketName: '%s'\n", config.S3.BucketName)
-	fmt.Printf("DEBUG: S3 Endpoint: '%s'\n", config.S3.Endpoint)
-	fmt.Printf("DEBUG: S3 AccessKey: '%s'\n", config.S3.AccessKey)
-	fmt.Printf("DEBUG: S3 SecretKey: '%s'\n", config.S3.SecretKey)
-	fmt.Printf("DEBUG: S3 ListenDir: '%s'\n", config.S3.ListenDir)
-
-	// 调试：打印所有配置键
-	fmt.Printf("DEBUG: All config keys:\n")
-	for _, key := range v.AllKeys() {
-		fmt.Printf("  %s: %v\n", key, v.Get(key))
-	}
-
 	return &config, nil
 }
 

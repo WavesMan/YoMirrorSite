@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,8 +165,8 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 
 	newestTag := lastSyncedTag
 	for _, release := range releases {
-		// 跳过已同步的版本
-		if release.TagName <= lastSyncedTag {
+		// 跳过已同步的版本（语义版本号比较，避免字典序误判如 1.9.0 > 1.10.0）
+		if lastSyncedTag != "" && compareSemVer(release.TagName, lastSyncedTag) <= 0 {
 			continue
 		}
 
@@ -177,24 +178,26 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 			continue
 		}
 
+		// PG 持久化：先 upsert version 获取 ID，再同步资产时关联
+		var versionID int
+		if s.pgClient != nil && s.pgClient.IsEnabled() {
+			versionID, _ = s.pgClient.UpsertVersion(ctx, &model.VersionTable{
+				SoftwareID:  swCfg.ID,
+				TagName:     release.TagName,
+				Name:        release.Name,
+				Prerelease:  release.Prerelease,
+				PublishedAt: release.PublishedAt,
+				Body:        release.Body,
+			})
+		}
+
 		// 同步该版本的资产
-		assetsUploaded := s.syncReleaseAssets(ctx, swCfg, &release, result)
+		assetsUploaded := s.syncReleaseAssets(ctx, swCfg, &release, result, versionID)
 		if assetsUploaded > 0 {
 			// 写入版本元数据到 Redis
 			s.saveVersionMeta(ctx, swCfg.ID, &release)
-			// PG 持久化：upsert version（按 software_id + tag_name 唯一）
-			if s.pgClient != nil && s.pgClient.IsEnabled() {
-				_, _ = s.pgClient.UpsertVersion(ctx, &model.VersionTable{
-					SoftwareID:  swCfg.ID,
-					TagName:     release.TagName,
-					Name:        release.Name,
-					Prerelease:  release.Prerelease,
-					PublishedAt: release.PublishedAt,
-					Body:        release.Body,
-				})
-			}
 			result.NewVersions++
-			if release.TagName > newestTag {
+			if compareSemVer(release.TagName, newestTag) > 0 {
 				newestTag = release.TagName
 			}
 		}
@@ -244,7 +247,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 
 // syncReleaseAssets 同步一个 Release 的所有资产文件
 // 返回成功上传的资产数量
-func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.SoftwareConfig, release *github.Release, result *SyncResult) int {
+func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.SoftwareConfig, release *github.Release, result *SyncResult, versionID int) int {
 	uploaded := 0
 
 	for _, asset := range release.Assets {
@@ -314,7 +317,7 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 		// PG 持久化：每条资产上传后立即 INSERT（幂等：s3_key 唯一）
 		if s.pgClient != nil && s.pgClient.IsEnabled() {
 			_, _ = s.pgClient.BatchInsertAssets(ctx, []model.AssetTable{{
-				VersionID:   0, // version_id 暂置 0，对账时再关联
+				VersionID:   versionID,
 				Name:        asset.Name,
 				Size:        asset.Size,
 				ContentType: asset.ContentType,
@@ -436,6 +439,43 @@ func ComputeChecksum(r io.Reader) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// compareSemVer 语义版本号比较
+// 解析 "1.85.0" / "v1.85.0" 格式，逐段数值对比
+// 返回 -1（a<b）、0（a==b）、1（a>b）
+// 避免字典序比较导致的 "1.9.0" > "1.10.0" 问题
+func compareSemVer(a, b string) int {
+	parse := func(s string) []int {
+		s = strings.TrimPrefix(s, "v")
+		parts := strings.Split(s, ".")
+		nums := make([]int, len(parts))
+		for i, p := range parts {
+			nums[i], _ = strconv.Atoi(p)
+		}
+		return nums
+	}
+	va, vb := parse(a), parse(b)
+	maxLen := len(va)
+	if len(vb) > maxLen {
+		maxLen = len(vb)
+	}
+	for i := 0; i < maxLen; i++ {
+		av, bv := 0, 0
+		if i < len(va) {
+			av = va[i]
+		}
+		if i < len(vb) {
+			bv = vb[i]
+		}
+		if av < bv {
+			return -1
+		}
+		if av > bv {
+			return 1
+		}
+	}
+	return 0
 }
 
 // MirrorPath 构建 S3 中的镜像文件路径

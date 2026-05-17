@@ -32,6 +32,8 @@ const (
 	DefaultTimeout = 30 * time.Second
 	// MaxRetries 最大重试次数
 	MaxRetries = 3
+	// MaxPages 最大翻页数（防止无限循环导致 OOM）
+	MaxPages = 50
 	// RateLimitBuffer 速率限制缓冲区（提前停止请求）
 	RateLimitBuffer = 10
 )
@@ -212,6 +214,10 @@ func (c *Client) ListAllReleases(ctx context.Context, owner, repo string) ([]Rel
 			break
 		}
 		page++
+		// 防止无限翻页（恶意仓库或有问题的分页）
+		if page > MaxPages {
+			break
+		}
 	}
 
 	return allReleases, nil
