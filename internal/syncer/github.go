@@ -536,7 +536,7 @@ func (s *GitHubSyncer) cleanupOldVersions(ctx context.Context, swCfg config.Soft
 		// 批量删除 S3 对象
 		var objectIds []s3types.ObjectIdentifier
 		for _, obj := range objects {
-			objectIds = append(objectIds, s3types.ObjectIdentifier{Key: aws.String(obj.Key)})
+			objectIds = append(objectIds, s3types.ObjectIdentifier{Key: obj.Key})
 		}
 		if len(objectIds) > 0 {
 			_, err := s.s3Client.DeleteObjects(ctx, &awss3.DeleteObjectsInput{

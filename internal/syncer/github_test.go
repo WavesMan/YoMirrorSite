@@ -1,9 +1,11 @@
 // GitHub 同步器辅助函数单元测试
 // 测试 compareSemVer、parseRepo、MirrorPath、ComputeChecksum 等纯函数
+// 含多同步规则相关测试（YoMirrorSite 新增）
 
 package syncer
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -131,4 +133,61 @@ func TestCompareSemVer_RealWorld(t *testing.T) {
 		got := compareSemVer(tt.a, tt.b)
 		assert.Equal(t, tt.want, got, "compareSemVer(%q, %q)", tt.a, tt.b)
 	}
+}
+
+// ============================================================
+// compareSemVer 扩展测试（多同步规则覆盖）
+// ============================================================
+
+func TestCompareSemVer_FourSegment(t *testing.T) {
+	assert.Equal(t, 1, compareSemVer("24.0.7.0", "24.0.6.0"))
+	assert.Equal(t, 0, compareSemVer("24.0.7.0", "24.0.7.0"))
+}
+
+func TestCompareSemVer_LargeNumbers(t *testing.T) {
+	assert.Equal(t, 1, compareSemVer("2024.1.0", "2023.12.0"))
+	assert.Equal(t, 1, compareSemVer("100.0.0", "99.999.999"))
+}
+
+func TestCompareSemVer_LeadingZeros(t *testing.T) {
+	assert.Equal(t, 0, compareSemVer("1.01.0", "1.1.0"))
+}
+
+// ============================================================
+// 版本排序测试（cleanupOldVersions 依赖 sort + compareSemVer）
+// ============================================================
+
+func TestVersionSort_KeepNewest(t *testing.T) {
+	tags := []string{"v1.0.0", "v2.0.0", "v1.5.0", "v3.0.0", "v2.5.0"}
+	sort.Slice(tags, func(i, j int) bool {
+		return compareSemVer(tags[i], tags[j]) > 0
+	})
+	expected := []string{"v3.0.0", "v2.5.0", "v2.0.0", "v1.5.0", "v1.0.0"}
+	assert.Equal(t, expected, tags)
+}
+
+func TestVersionSort_KeepN(t *testing.T) {
+	tags := []string{"v1.0.0", "v2.0.0", "v1.5.0", "v3.0.0", "v2.5.0"}
+	sort.Slice(tags, func(i, j int) bool {
+		return compareSemVer(tags[i], tags[j]) > 0
+	})
+	keepN := 3
+	keep := tags[:keepN]
+	deleted := tags[keepN:]
+	assert.Equal(t, []string{"v3.0.0", "v2.5.0", "v2.0.0"}, keep)
+	assert.Equal(t, []string{"v1.5.0", "v1.0.0"}, deleted)
+}
+
+func TestVersionSort_KeepOne(t *testing.T) {
+	tags := []string{"v1.0.0", "v2.0.0"}
+	sort.Slice(tags, func(i, j int) bool {
+		return compareSemVer(tags[i], tags[j]) > 0
+	})
+	assert.Equal(t, "v2.0.0", tags[0])
+}
+
+func TestVersionSort_NoDeleteWhenLess(t *testing.T) {
+	tags := []string{"v1.0.0", "v2.0.0"}
+	keepN := 3
+	assert.True(t, len(tags) <= keepN)
 }

@@ -15,7 +15,7 @@ YoMirrorSite 是一个基于 Go 语言开发的软件镜像站，专为团队内
 
 | 模块 | 能力 |
 |---|---|
-| **GitHub 同步** | 增量检测 Release、分布式锁互斥、流式上传 S3（不落磁盘）、幂等重试 |
+| **GitHub 同步** | 增量检测 Release、分布式锁互斥、流式上传 S3（不落磁盘）、幂等重试、多同步规则（增量 / 只保留最新 / 全量历史） |
 | **软件镜像** | 分类浏览、关键词搜索、星数排序、分页加载 |
 | **软件详情** | 版本时间线、Release Notes 渲染、多平台下载、下载计数 |
 | **文件下载** | S3 预签名 URL、防击穿锁、TTL 可控 |
@@ -162,6 +162,39 @@ postgres:                      # 可选，不配则降级到纯 S3+Redis
   dbname: "yomirror"
   sslmode: "disable"
   max_conns: 10
+```
+
+### 多同步规则
+
+`sync_rule` 支持按软件仓库分别配置三种同步策略：
+
+| 规则 | 配置值 | 行为 |
+|------|--------|------|
+| 增量同步 | `incremental`（默认） | 从上次同步 tag 之后只拉取新版本 |
+| 只保留最新 | `latest_only` | 增量同步后自动清理旧版本，仅保留最近 `keep_versions` 个 |
+| 全量历史 | `full_historical` | 无视同步标记，拉取所有 Release |
+
+示例：
+
+```yaml
+mirror:
+  software_list:
+    # 增量同步（默认）
+    - id: "vscode"
+      github_repo: "microsoft/vscode"
+      # sync_rule 不写即默认 incremental
+
+    # 只保留最新 3 个版本
+    - id: "golang"
+      github_repo: "golang/go"
+      sync_rule: "latest_only"
+      keep_versions: 3
+
+    # 首次全量同步，之后自动切回增量
+    - id: "redis"
+      github_repo: "redis/redis"
+      sync_rule: "full_historical"
+      full_sync_once: true
 ```
 
 ---
