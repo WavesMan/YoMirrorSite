@@ -145,3 +145,23 @@ func (c *Client) ListS3KeysBySoftware(ctx context.Context, softwareID string) ([
 func (c *Client) DeleteAssetByS3Key(ctx context.Context, s3Key string) error {
 	return c.DB.WithContext(ctx).Where("s3_key = ?", s3Key).Delete(&model.AssetTable{}).Error
 }
+
+// DeleteOldVersions 按软件 ID + tag 列表级联删除版本和资产记录
+// 用于 latest_only 同步规则下的旧版本清理
+func (c *Client) DeleteOldVersions(ctx context.Context, softwareID string, tags []string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	// 先删除资产（GORM 软删除或硬删除取决于 model 定义，此处为硬删除）
+	err := c.DB.WithContext(ctx).
+		Where("version_id IN (?)",
+			c.DB.Table("version").Select("id").Where("software_id = ? AND tag_name IN ?", softwareID, tags)).
+		Delete(&model.AssetTable{}).Error
+	if err != nil {
+		return err
+	}
+	// 再删除版本
+	return c.DB.WithContext(ctx).
+		Where("software_id = ? AND tag_name IN ?", softwareID, tags).
+		Delete(&model.VersionTable{}).Error
+}

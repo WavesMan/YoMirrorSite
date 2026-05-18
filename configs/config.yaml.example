@@ -46,7 +46,15 @@ s3:
 # 软件镜像站配置
 # ============================================================
 mirror:
+  # ============================================================
+  # 多同步规则说明
+  # sync_rule 支持三种模式（按软件仓库分别配置）：
+  #   incremental     — 增量同步：只拉取新版本（默认，不写即为此模式）
+  #   latest_only     — 只保留最新：增量同步后自动清理旧版本
+  #   full_historical — 全量历史：拉取所有 Release，适合首次部署
+  # ============================================================
   software_list:
+    # 规则 1：增量同步（默认，无需显式声明 sync_rule）
     - id: "vscode"
       name: "Visual Studio Code"
       github_repo: "microsoft/vscode"
@@ -58,6 +66,31 @@ mirror:
         - platform: "linux-x64"
           pattern: "code-stable-x64-*.tar.gz"
       sync_prerelease: false
+      # sync_rule 未设置，默认 incremental
+
+    # 规则 2：只保留最新 3 个版本（节省磁盘空间）
+    - id: "golang"
+      name: "Go"
+      github_repo: "golang/go"
+      category: "language"
+      tags: ["编程语言"]
+      sync_rule: "latest_only"
+      keep_versions: 3
+      filter_assets:
+        - platform: "linux-amd64"
+          pattern: "go*.linux-amd64.tar.gz"
+
+    # 规则 3：首次全量历史同步，之后自动切回增量
+    - id: "redis"
+      name: "Redis"
+      github_repo: "redis/redis"
+      category: "database"
+      tags: ["数据库", "缓存"]
+      sync_rule: "full_historical"
+      full_sync_once: true       # 首次全量后自动切回 incremental
+      filter_assets:
+        - platform: "linux-x64"
+          pattern: "redis-*.tar.gz"
   sync:
     interval_minutes: 30
     github_token: "${GITHUB_TOKEN}"

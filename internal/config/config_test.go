@@ -167,6 +167,119 @@ func TestSoftwareConfig_MatchAssetName_MultipleFilters(t *testing.T) {
 // PostgresConfig.ApplyDefaults 测试
 // ============================================================
 
+// ============================================================
+// SyncRule 类型测试（YoMirrorSite 新增）
+// ============================================================
+
+func TestSyncRule_constants(t *testing.T) {
+	assert.Equal(t, SyncRule("incremental"), SyncRuleIncremental)
+	assert.Equal(t, SyncRule("latest_only"), SyncRuleLatestOnly)
+	assert.Equal(t, SyncRule("full_historical"), SyncRuleFullHistorical)
+}
+
+func TestSyncRule_isValidSyncRule(t *testing.T) {
+	assert.True(t, SyncRuleIncremental.isValidSyncRule())
+	assert.True(t, SyncRuleLatestOnly.isValidSyncRule())
+	assert.True(t, SyncRuleFullHistorical.isValidSyncRule())
+	assert.True(t, SyncRule("").isValidSyncRule())
+	assert.False(t, SyncRule("invalid").isValidSyncRule())
+}
+
+// ============================================================
+// MirrorConfig.ApplyDefaults（多同步规则默认值）测试
+// ============================================================
+
+func TestMirrorConfig_ApplyDefaults_SyncRule_Default(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1"},
+			{ID: "sw2", SyncRule: SyncRuleLatestOnly, KeepVersions: 5},
+		},
+	}
+	cfg.ApplyDefaults()
+	assert.Equal(t, SyncRuleIncremental, cfg.SoftwareList[0].SyncRule)
+	assert.Equal(t, 1, cfg.SoftwareList[0].KeepVersions)
+	assert.Equal(t, SyncRuleLatestOnly, cfg.SoftwareList[1].SyncRule)
+	assert.Equal(t, 5, cfg.SoftwareList[1].KeepVersions)
+}
+
+func TestMirrorConfig_ApplyDefaults_SyncRule_InvalidFallback(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1", SyncRule: "nonexistent"},
+		},
+	}
+	cfg.ApplyDefaults()
+	assert.Equal(t, SyncRuleIncremental, cfg.SoftwareList[0].SyncRule)
+}
+
+func TestMirrorConfig_ApplyDefaults_KeepVersions_Zero(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1", KeepVersions: 0},
+			{ID: "sw2", KeepVersions: -1},
+		},
+	}
+	cfg.ApplyDefaults()
+	assert.Equal(t, 1, cfg.SoftwareList[0].KeepVersions)
+	assert.Equal(t, 1, cfg.SoftwareList[1].KeepVersions)
+}
+
+func TestMirrorConfig_ApplyDefaults_FullSyncOnce(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1", SyncRule: SyncRuleFullHistorical, FullSyncOnce: true},
+		},
+	}
+	cfg.ApplyDefaults()
+	assert.True(t, cfg.SoftwareList[0].FullSyncOnce)
+}
+
+// ============================================================
+// MirrorConfig.ValidateSyncRules 测试
+// ============================================================
+
+func TestMirrorConfig_ValidateSyncRules_AllValid(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1", SyncRule: SyncRuleIncremental},
+			{ID: "sw2", SyncRule: SyncRuleLatestOnly, KeepVersions: 3},
+			{ID: "sw3", SyncRule: SyncRuleFullHistorical, FullSyncOnce: true},
+			{ID: "sw4"},
+		},
+	}
+	err := cfg.ValidateSyncRules()
+	assert.NoError(t, err)
+}
+
+func TestMirrorConfig_ValidateSyncRules_InvalidRule(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1", SyncRule: "invalid_rule"},
+		},
+	}
+	err := cfg.ValidateSyncRules()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "未知的 sync_rule")
+}
+
+func TestMirrorConfig_ValidateSyncRules_LatestOnly_KeepVersions(t *testing.T) {
+	cfg := &MirrorConfig{
+		SoftwareList: []SoftwareConfig{
+			{ID: "sw1", SyncRule: SyncRuleLatestOnly, KeepVersions: 0},
+		},
+	}
+	err := cfg.ValidateSyncRules()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "keep_versions 至少为 1")
+}
+
+func TestMirrorConfig_ValidateSyncRules_EmptyList(t *testing.T) {
+	cfg := &MirrorConfig{SoftwareList: nil}
+	err := cfg.ValidateSyncRules()
+	assert.NoError(t, err)
+}
+
 func TestPostgresConfig_ApplyDefaults(t *testing.T) {
 	cfg := &PostgresConfig{}
 	cfg.ApplyDefaults()

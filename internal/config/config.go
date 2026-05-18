@@ -112,6 +112,33 @@ func (c *Config) Validate() error {
 }
 
 // ============================================================
+// 多同步规则（YoMirrorSite 新增）
+// ============================================================
+
+// SyncRule 同步规则枚举
+// 控制每个软件仓库的同步策略
+type SyncRule string
+
+const (
+	// SyncRuleIncremental 增量同步：从上次同步的 tag 之后只拉取新版本（默认行为）
+	SyncRuleIncremental SyncRule = "incremental"
+	// SyncRuleLatestOnly 只保留最新：增量同步后清理旧版本，仅保留最近 N 个版本
+	SyncRuleLatestOnly SyncRule = "latest_only"
+	// SyncRuleFullHistorical 全量历史：无视 last_synced_tag，拉取所有 Release（新→旧）
+	SyncRuleFullHistorical SyncRule = "full_historical"
+)
+
+// isValidSyncRule 校验 sync_rule 值是否合法
+func (r SyncRule) isValidSyncRule() bool {
+	switch r {
+	case SyncRuleIncremental, SyncRuleLatestOnly, SyncRuleFullHistorical, "":
+		return true
+	default:
+		return false
+	}
+}
+
+// ============================================================
 // 镜像站配置（YoMirrorSite 新增）
 // ============================================================
 
@@ -133,6 +160,10 @@ type SoftwareConfig struct {
 	FilterAssets   []AssetFilter `yaml:"filter_assets"`   // 资产过滤规则（只同步匹配的文件）
 	SyncPrerelease bool          `yaml:"sync_prerelease"` // 是否同步预发布版本
 	IconPattern    string        `yaml:"icon_pattern"`    // 图标文件在仓库中的路径模式（可选）
+	// === 多同步规则（YoMirrorSite 新增） ===
+	SyncRule     SyncRule `yaml:"sync_rule"`      // 同步规则，默认 incremental（向后兼容：空值 = incremental）
+	KeepVersions int      `yaml:"keep_versions"`  // latest_only 模式下保留最近 N 个版本（默认 1）
+	FullSyncOnce bool     `yaml:"full_sync_once"` // full_historical 模式下首次全量后自动切回 incremental
 }
 
 // AssetFilter 资产过滤规则
@@ -154,7 +185,7 @@ type SyncConfig struct {
 // 配置默认值填充
 // ============================================================
 
-// ApplyDefaults 为镜像站配置填充默认值
+// ApplyDefaults 为镜像站配置填充默认值（含多同步规则默认值）
 func (c *MirrorConfig) ApplyDefaults() {
 	if c.Sync.IntervalMinutes <= 0 {
 		c.Sync.IntervalMinutes = 30
@@ -165,11 +196,21 @@ func (c *MirrorConfig) ApplyDefaults() {
 	if c.Sync.RetryAttempts <= 0 {
 		c.Sync.RetryAttempts = 3
 	}
-	// 为每个软件配置过滤规则提供默认值
+	// 为每个软件配置提供默认值（含多同步规则）
 	for i := range c.SoftwareList {
 		sw := &c.SoftwareList[i]
 		if sw.Category == "" {
 			sw.Category = "uncategorized"
+		}
+		// 多同步规则默认值
+		if sw.SyncRule == "" {
+			sw.SyncRule = SyncRuleIncremental
+		} else if !sw.SyncRule.isValidSyncRule() {
+			// 非法值回退增量（防御）
+			sw.SyncRule = SyncRuleIncremental
+		}
+		if sw.KeepVersions <= 0 {
+			sw.KeepVersions = 1
 		}
 	}
 }
@@ -245,4 +286,22 @@ func (sw *SoftwareConfig) MatchAssetName(name string) bool {
 		}
 	}
 	return len(sw.FilterAssets) == 0 // 如果没有配置过滤规则，则全部通过
+}
+
+// ============================================================
+// 多同步规则校验（YoMirrorSite 新增）
+// ============================================================
+
+// ValidateSyncRules 校验所有软件配置的同步规则是否合法
+// 返回首个不合法的错误，nil 表示全部通过
+func (c *MirrorConfig) ValidateSyncRules() error {
+	for i, sw := range c.SoftwareList {
+		if !sw.SyncRule.isValidSyncRule() {
+			return fmt.Errorf("software[%d] (%s): 未知的 sync_rule: %s", i, sw.ID, sw.SyncRule)
+		}
+		if sw.SyncRule == SyncRuleLatestOnly && sw.KeepVersions < 1 {
+			return fmt.Errorf("software[%d] (%s): latest_only 模式下 keep_versions 至少为 1", i, sw.ID)
+		}
+	}
+	return nil
 }
