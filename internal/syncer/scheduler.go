@@ -161,6 +161,7 @@ func (s *Scheduler) syncAll(ctx context.Context) {
 
 		wg.Add(1)
 		sw := s.softwares[i] // 拷贝，避免闭包引用问题
+		idx := i              // 捕获索引，供 goroutine 内回写用
 
 		go func(swCfg config.SoftwareConfig) {
 			defer wg.Done()
@@ -185,6 +186,15 @@ func (s *Scheduler) syncAll(ctx context.Context) {
 					zap.Int("new_versions", result.NewVersions),
 					zap.Int("new_assets", result.NewAssets),
 					zap.Int("skipped", result.Skipped))
+			}
+
+			// 方案 A：full_sync_once 完成后自动切回增量模式
+			if err == nil && swCfg.FullSyncOnce && swCfg.SyncRule == config.SyncRuleFullHistorical {
+				s.mu.Lock()
+				s.softwares[idx].SyncRule = config.SyncRuleIncremental
+				s.mu.Unlock()
+				util.Info("full_sync_once 完成，已自动切回增量同步模式",
+					zap.String("software", swCfg.ID))
 			}
 		}(sw)
 	}

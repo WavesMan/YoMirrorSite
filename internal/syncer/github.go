@@ -1,13 +1,18 @@
 // GitHub Release 同步器
-// 负责将 GitHub Release 资产增量同步到 S3 对象存储
+// 负责将 GitHub Release 资产同步到 S3 对象存储
+// 支持三种同步规则（按软件仓库分别控制）：
+//   incremental:     增量同步 — 从上次同步的 tag 之后只拉取新版本（默认）
+//   latest_only:     只保留最新 — 增量同步后清理旧版本，仅保留最近 N 个
+//   full_historical: 全量历史 — 无视 last_synced_tag，拉取所有 Release（新→旧）
 // 核心流程：
 //   1. 获取分布式锁 lock:sync:{software_id} 防止多实例重复
-//   2. 从 Redis 读取已同步的最新 tag (last_synced_tag)
-//   3. 分页拉取 GitHub Releases，仅处理新版本
+//   2. 根据同步规则选择策略
+//   3. 分页拉取 GitHub Releases
 //   4. 逐个资产流式下载 → S3 PutObject（不落磁盘）
 //   5. 写入版本/资产元数据到 Redis + S3
 //   6. 更新 last_synced_tag
-//   7. 释放分布式锁
+//   7. [latest_only] 清理超出保留个数的旧版本
+//   8. 释放分布式锁
 
 package syncer
 
@@ -18,11 +23,15 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"go.uber.org/zap"
 
 	"yomirrorsite/internal/model"
@@ -107,13 +116,14 @@ func NewGitHubSyncer(ghClient *github.Client, s3Client *s3.Client, cfg *config.M
 }
 
 // ============================================================
-// 核心同步流程
+// 核心同步流程（策略分派入口）
 // ============================================================
 
-// SyncSoftware 同步单个软件的所有新版本
-// 整体流程：
-//   AcquireLock → 读取已同步标记 → 拉取 Releases → 遍历新版本 →
-//   下载资产 → S3 PutObject → 写元数据 → 更新标记 → ReleaseLock
+// SyncSoftware 同步单个软件（按配置的 sync_rule 选择策略）
+// 三种策略：
+//   incremental:     增量同步（默认，向后兼容）
+//   latest_only:     增量 + 清理旧版本，仅保留最近 keep_versions 个
+//   full_historical: 全量拉取所有 Release（新→旧），可选首次后切回增量
 func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareConfig) (*SyncResult, error) {
 	startTime := time.Now()
 	result := &SyncResult{SoftwareID: swCfg.ID}
@@ -134,14 +144,85 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 	// 更新同步状态
 	s.setStatus(true, swCfg.ID)
 
-	// 2. 获取已同步的最新 tag
+	// 2. 根据同步规则选择策略
+	switch swCfg.SyncRule {
+	case config.SyncRuleIncremental, "":
+		// 规则 1：增量同步（当前行为）
+		result, err = s.syncIncremental(ctx, swCfg, result)
+
+	case config.SyncRuleLatestOnly:
+		// 规则 2：增量同步 + 后清理旧版本
+		result, err = s.syncIncremental(ctx, swCfg, result)
+		if err == nil {
+			s.cleanupOldVersions(ctx, swCfg, swCfg.KeepVersions)
+		}
+
+	case config.SyncRuleFullHistorical:
+		// 规则 3：全量历史同步（新→旧）
+		result, err = s.syncFullHistorical(ctx, swCfg, result)
+		// 如果配置了 full_sync_once，完成全量后更新标记切回增量模式
+		if err == nil && swCfg.FullSyncOnce {
+			newestTag := s.extractNewestTag(result)
+			if newestTag != "" {
+				_ = s.setLastSyncedTag(ctx, swCfg.ID, newestTag)
+			}
+		}
+
+	default:
+		// 未知规则，回退增量（防御）
+		util.Warn("未知的同步规则，回退增量模式",
+			zap.String("software", swCfg.ID),
+			zap.String("sync_rule", string(swCfg.SyncRule)))
+		result, err = s.syncIncremental(ctx, swCfg, result)
+	}
+
+	// 3. 后处理（PG 写入 + 状态更新）
+	if err == nil {
+		newestTag := s.extractNewestTag(result)
+		s.writeToPG(ctx, swCfg, result, newestTag)
+	}
+
+	// 4. 更新最后同步时间
+	s.mu.Lock()
+	s.lastSyncAt = time.Now()
+	s.mu.Unlock()
+
+	result.Duration = time.Since(startTime)
+	s.setStatus(false, "")
+
+	// 保存同步结果
+	s.lastResult = &model.SyncResultBrief{
+		SoftwareID:  swCfg.ID,
+		NewVersions: result.NewVersions,
+		NewAssets:   result.NewAssets,
+		Errors:      result.Errors,
+		Duration:    result.Duration.Round(time.Second).String(),
+	}
+
+	util.Info("软件同步完成",
+		zap.String("software", swCfg.ID),
+		zap.String("sync_rule", string(swCfg.SyncRule)),
+		zap.Int("new_versions", result.NewVersions),
+		zap.Int("new_assets", result.NewAssets),
+		zap.Duration("duration", result.Duration))
+
+	return result, nil
+}
+
+// ============================================================
+// 策略 1：增量同步（原 SyncSoftware 核心逻辑）
+// ============================================================
+
+// syncIncremental 增量同步：从 last_synced_tag 之后只拉取新版本
+func (s *GitHubSyncer) syncIncremental(ctx context.Context, swCfg config.SoftwareConfig, result *SyncResult) (*SyncResult, error) {
+	// 获取已同步的最新 tag
 	lastSyncedTag, err := s.getLastSyncedTag(ctx, swCfg.ID)
 	if err != nil {
 		util.Warn("获取已同步标记失败，将全量同步",
 			zap.String("software", swCfg.ID), zap.Error(err))
 	}
 
-	// 3. 拉取 GitHub Releases（从最新开始）
+	// 拉取 GitHub Releases
 	owner, repo := parseRepo(swCfg.GitHubRepo)
 	if owner == "" || repo == "" {
 		return nil, fmt.Errorf("无效的仓库路径: %s", swCfg.GitHubRepo)
@@ -157,7 +238,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		zap.Int("total", len(releases)),
 		zap.String("last_synced_tag", lastSyncedTag))
 
-	// 4. 遍历 Release（GitHub 返回按时间倒序，需从旧到新处理以保证最新 tag 正确）
+	// 遍历 Release（GitHub 返回按时间倒序，需从旧到新处理以保证最新 tag 正确）
 	// 先反转顺序
 	for i, j := 0, len(releases)-1; i < j; i, j = i+1, j-1 {
 		releases[i], releases[j] = releases[j], releases[i]
@@ -210,7 +291,7 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		}
 	}
 
-	// 5. 更新已同步标记
+	// 更新已同步标记
 	if newestTag > lastSyncedTag || (lastSyncedTag == "" && newestTag != "") {
 		if err := s.setLastSyncedTag(ctx, swCfg.ID, newestTag); err != nil {
 			util.Error("更新已同步标记失败",
@@ -222,35 +303,86 @@ func (s *GitHubSyncer) SyncSoftware(ctx context.Context, swCfg config.SoftwareCo
 		_ = s.setLatestTag(ctx, swCfg.ID, newestTag)
 	}
 
-	// 6. 更新最后同步时间
-	s.mu.Lock()
-	s.lastSyncAt = time.Now()
-	s.mu.Unlock()
+	return result, nil
+}
 
-	// 7. PG 持久化（YoMirrorSite 新增）
-	// 每条资产上传后立即写 PG；此处汇总 upsert software 表
-	s.writeToPG(ctx, swCfg, result, newestTag)
+// ============================================================
+// 策略 3：全量历史同步
+// ============================================================
 
-	result.Duration = time.Since(startTime)
-	s.setStatus(false, "")
-
-	// 保存同步结果
-	s.lastResult = &model.SyncResultBrief{
-		SoftwareID:  swCfg.ID,
-		NewVersions: result.NewVersions,
-		NewAssets:   result.NewAssets,
-		Errors:      result.Errors,
-		Duration:    result.Duration.Round(time.Second).String(),
+// syncFullHistorical 全量历史同步：无视 last_synced_tag，拉取所有 Release
+// 按 GitHub 原始返回顺序（新→旧）处理，但仍需从旧到新保证标记正确性
+func (s *GitHubSyncer) syncFullHistorical(ctx context.Context, swCfg config.SoftwareConfig, result *SyncResult) (*SyncResult, error) {
+	owner, repo := parseRepo(swCfg.GitHubRepo)
+	if owner == "" || repo == "" {
+		return nil, fmt.Errorf("无效的仓库路径: %s", swCfg.GitHubRepo)
 	}
 
-	util.Info("软件同步完成",
+	releases, err := s.ghClient.ListAllReleases(ctx, owner, repo)
+	if err != nil {
+		return nil, fmt.Errorf("获取 Releases 失败: %w", err)
+	}
+
+	util.Info("全量历史同步：获取到 Releases",
 		zap.String("software", swCfg.ID),
-		zap.Int("new_versions", result.NewVersions),
-		zap.Int("new_assets", result.NewAssets),
-		zap.Duration("duration", result.Duration))
+		zap.Int("total", len(releases)),
+		zap.String("mode", "full_historical"))
+
+	// 从旧到新处理（与 incremental 一致，保证 tag 标记正确）
+	for i, j := 0, len(releases)-1; i < j; i, j = i+1, j-1 {
+		releases[i], releases[j] = releases[j], releases[i]
+	}
+
+	var newestTag string
+	for _, release := range releases {
+		// 跳过预发布版本（按配置）
+		if release.Prerelease && !swCfg.SyncPrerelease {
+			continue
+		}
+
+		// 不检查 last_synced_tag —— 全量同步所有非预发布版本
+
+		var versionID int
+		if s.pgClient != nil && s.pgClient.IsEnabled() {
+			vid, err := s.pgClient.UpsertVersion(ctx, &model.VersionTable{
+				SoftwareID:  swCfg.ID,
+				TagName:     release.TagName,
+				Name:        release.Name,
+				Prerelease:  release.Prerelease,
+				PublishedAt: release.PublishedAt,
+				Body:        release.Body,
+			})
+			if err != nil {
+				util.Warn("UpsertVersion 失败",
+					zap.String("software", swCfg.ID),
+					zap.String("tag", release.TagName),
+					zap.Error(err))
+			}
+			versionID = vid
+		}
+
+		assetsUploaded := s.syncReleaseAssets(ctx, swCfg, &release, result, versionID)
+		if assetsUploaded > 0 {
+			s.saveVersionMeta(ctx, swCfg.ID, &release)
+			result.NewVersions++
+			if newestTag == "" || compareSemVer(release.TagName, newestTag) > 0 {
+				newestTag = release.TagName
+			}
+		}
+	}
+
+	// 更新标记
+	if newestTag != "" {
+		_ = s.setLastSyncedTag(ctx, swCfg.ID, newestTag)
+		_ = s.setLatestTag(ctx, swCfg.ID, newestTag)
+	}
 
 	return result, nil
 }
+
+// ============================================================
+// syncReleaseAssets（共享：同步单个 Release 的资产）
+// ============================================================
 
 // syncReleaseAssets 同步一个 Release 的所有资产文件
 // 返回成功上传的资产数量
@@ -342,6 +474,132 @@ func (s *GitHubSyncer) syncReleaseAssets(ctx context.Context, swCfg config.Softw
 	}
 
 	return uploaded
+}
+
+// ============================================================
+// 策略 2：版本清理（latest_only）
+// ============================================================
+
+// cleanupOldVersions 清理旧版本，仅保留最近 keepN 个版本
+// 在增量同步完成后调用，分布式锁内执行（安全）
+// 清理范围：S3 对象 + Redis 元数据 + PG 记录
+func (s *GitHubSyncer) cleanupOldVersions(ctx context.Context, swCfg config.SoftwareConfig, keepN int) {
+	if keepN <= 0 {
+		keepN = 1 // 防御：至少保留 1 个版本
+	}
+
+	// 1. 列举 S3 中该软件的所有版本目录
+	versionTags, err := s.listVersionsFromS3(ctx, swCfg.ID)
+	if err != nil {
+		util.Warn("列举 S3 版本目录失败，跳过清理",
+			zap.String("software", swCfg.ID), zap.Error(err))
+		return
+	}
+
+	if len(versionTags) <= keepN {
+		util.Debug("版本数未超过保留上限，无需清理",
+			zap.String("software", swCfg.ID),
+			zap.Int("versions", len(versionTags)),
+			zap.Int("keep", keepN))
+		return
+	}
+
+	// 2. 按语义版本排序（降序，最新在前）
+	sort.Slice(versionTags, func(i, j int) bool {
+		return compareSemVer(versionTags[i], versionTags[j]) > 0
+	})
+
+	// 3. 保留最新的 keepN 个，删除其余
+	toDelete := versionTags[keepN:]
+
+	util.Info("开始清理旧版本",
+		zap.String("software", swCfg.ID),
+		zap.Int("total_versions", len(versionTags)),
+		zap.Int("keep", keepN),
+		zap.Int("delete", len(toDelete)),
+		zap.Strings("to_delete", toDelete))
+
+	prefix := fmt.Sprintf("mirrors/%s/versions/", swCfg.ID)
+
+	for _, tag := range toDelete {
+		// 3a. 删除 S3 中该版本目录下所有对象
+		versionPrefix := prefix + tag + "/"
+		objects, err := s.s3Client.ListObjects(ctx, versionPrefix)
+		if err != nil {
+			util.Warn("列举 S3 版本对象失败",
+				zap.String("software", swCfg.ID),
+				zap.String("tag", tag),
+				zap.Error(err))
+			continue
+		}
+
+		// 批量删除 S3 对象
+		var objectIds []s3types.ObjectIdentifier
+		for _, obj := range objects {
+			objectIds = append(objectIds, s3types.ObjectIdentifier{Key: obj.Key})
+		}
+		if len(objectIds) > 0 {
+			_, err := s.s3Client.DeleteObjects(ctx, &awss3.DeleteObjectsInput{
+				Bucket: aws.String(s.s3Client.BucketName()),
+				Delete: &s3types.Delete{Objects: objectIds, Quiet: aws.Bool(true)},
+			})
+			if err != nil {
+				util.Warn("批量删除 S3 对象失败",
+					zap.String("software", swCfg.ID),
+					zap.String("tag", tag),
+					zap.Error(err))
+			}
+		}
+
+		// 3b. 清理 Redis 版本元数据
+		redisKey := fmt.Sprintf("software:%s:version:%s", swCfg.ID, tag)
+		_ = util.Delete(ctx, redisKey)
+
+		// 3c. 清理 PG 版本 + 资产记录（如果启用）
+		if s.pgClient != nil && s.pgClient.IsEnabled() {
+			_ = s.pgClient.DeleteOldVersions(ctx, swCfg.ID, []string{tag})
+		}
+	}
+
+	util.Info("旧版本清理完成",
+		zap.String("software", swCfg.ID),
+		zap.Int("deleted", len(toDelete)))
+}
+
+// listVersionsFromS3 列举 S3 中某软件的所有版本 tag
+// 通过列举 mirrors/{softwareID}/versions/ 前缀的一级子目录获取
+func (s *GitHubSyncer) listVersionsFromS3(ctx context.Context, softwareID string) ([]string, error) {
+	prefix := fmt.Sprintf("mirrors/%s/versions/", softwareID)
+	objects, err := s.s3Client.ListObjects(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool)
+	var tags []string
+	for _, obj := range objects {
+		// Key 格式: mirrors/{softwareID}/versions/{tag}/filename
+		// 截取 versions/ 和下一个 / 之间的部分作为 tag
+		if obj.Key == nil {
+			continue
+		}
+		key := *obj.Key
+		idx := strings.Index(key, "versions/")
+		if idx < 0 {
+			continue
+		}
+		rest := key[idx+len("versions/"):]
+		slashIdx := strings.Index(rest, "/")
+		if slashIdx < 0 {
+			continue
+		}
+		tag := rest[:slashIdx]
+		if !seen[tag] {
+			seen[tag] = true
+			tags = append(tags, tag)
+		}
+	}
+	return tags, nil
 }
 
 // ============================================================
@@ -488,6 +746,20 @@ func compareSemVer(a, b string) int {
 // MirrorPath 构建 S3 中的镜像文件路径
 func MirrorPath(softwareID, tagName, assetName string) string {
 	return path.Join(mirrorsPathPrefix, softwareID, "versions", tagName, assetName)
+}
+
+// extractNewestTag 从 Syncer 内部提取当前同步周期中最新的 tag
+// 用于 SyncSoftware 后处理统一获取
+func (s *GitHubSyncer) extractNewestTag(result *SyncResult) string {
+	if result == nil {
+		return ""
+	}
+	// 从 Redis 读取最新标记（syncIncremental/syncFullHistorical 已更新）
+	tag, err := s.getLastSyncedTag(context.Background(), result.SoftwareID)
+	if err != nil {
+		return ""
+	}
+	return tag
 }
 
 // ============================================================

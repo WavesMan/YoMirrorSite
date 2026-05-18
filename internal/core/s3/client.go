@@ -126,6 +126,11 @@ func (c *Client) DeleteObjects(ctx context.Context, input *s3.DeleteObjectsInput
 	return c.client.DeleteObjects(ctx, input)
 }
 
+// BucketName 返回当前使用的 S3 存储桶名称
+func (c *Client) BucketName() string {
+	return c.bucketName
+}
+
 // UploadObject 上传对象（仅用于同步器）
 func (c *Client) UploadObject(ctx context.Context, key string, body io.Reader, contentType string) error {
 	// 如果key已经包含listen_dir前缀，则不再重复添加
