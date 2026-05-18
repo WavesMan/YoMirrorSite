@@ -580,7 +580,10 @@ func (s *GitHubSyncer) listVersionsFromS3(ctx context.Context, softwareID string
 	for _, obj := range objects {
 		// Key 格式: mirrors/{softwareID}/versions/{tag}/filename
 		// 截取 versions/ 和下一个 / 之间的部分作为 tag
-		key := obj.Key
+		if obj.Key == nil {
+			continue
+		}
+		key := *obj.Key
 		idx := strings.Index(key, "versions/")
 		if idx < 0 {
 			continue
